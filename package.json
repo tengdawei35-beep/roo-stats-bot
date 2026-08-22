@@ -1,0 +1,19 @@
+{
+  "name": "roo-stats-bot",
+  "version": "1.0.0",
+  "description": "Discord OCR bot for ROO player stat submissions",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "discord.js": "^14.21.0",
+    "dotenv": "^16.4.7",
+    "googleapis": "^161.0.0",
+    "sharp": "^0.35.3",
+    "tesseract.js": "^7.0.0"
+  },
+  "allowScripts": {
+    "tesseract.js@7.0.0": true
+  }
+}
