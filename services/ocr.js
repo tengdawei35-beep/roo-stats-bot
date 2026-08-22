@@ -731,7 +731,9 @@ const ALIASES = {
 
     "PVP DMG BON",
 
-    "PVP BONUS"
+    "PVP BONUS",
+    "VP DMG BONUS",
+    "P DMG BONUS"
 
   ],
 
@@ -742,7 +744,12 @@ const ALIASES = {
 
     "PVP DMG RED",
 
-    "PVP REDUCTION"
+    "PVP REDUCTION",
+    "VP DMG REDUCTION",
+    "P DMG REDUCTION",
+    "VP DMG REDUC",
+    "P DMG REDUCT",
+    "P DMG REDUCI"
 
   ],
 
