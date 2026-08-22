@@ -2025,7 +2025,8 @@ async function execute(
             confirmationCollector.stop(
               "submitted"
             );
-
+            return;
+          }
 
 
           // ==================================================
