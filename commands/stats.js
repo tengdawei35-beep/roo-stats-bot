@@ -1305,14 +1305,41 @@ async function execute(
       });
 
 
-      const imageUrls =
-        imageAttachments.map(
-          function(attachment) {
+    const imageUrls =
+      imageAttachments.map(
+        function(attachment) {
+          return attachment.url;
+        }
+      );
 
-            return attachment.url;
+    try {
 
-          }
+      await message.delete();
+
+      console.log(
+        "[STATS] Upload message deleted."
+      );
+
+    } catch (error) {
+
+      if (
+        error.code === 10008
+      ) {
+
+        console.log(
+          "[STATS] Upload message was already deleted."
         );
+
+      } else {
+
+        console.error(
+          "[STATS] Could not delete upload message:",
+          error
+        );
+
+      }
+
+}
 
 
       // ------------------------------------------------------
@@ -2000,28 +2027,6 @@ async function execute(
             );
 
 
-            // ------------------------------------------------
-            // DELETE SCREENSHOT MESSAGE
-            // ------------------------------------------------
-
-            try {
-
-              await message.delete();
-
-            } catch (error) {
-
-              console.log(
-                "[STATS] Could not delete upload message:",
-                error.message
-              );
-
-            }
-
-
-            return;
-
-          }
-
 
           // ==================================================
           // EDIT
@@ -2393,29 +2398,6 @@ async function execute(
 
         }
       );
-
-
-      // ------------------------------------------------------
-      // DELETE UPLOAD MESSAGE
-      // ------------------------------------------------------
-
-      try {
-
-        await message.delete();
-
-        console.log(
-          "[STATS] Upload message deleted."
-        );
-
-      } catch (error) {
-
-        console.log(
-          "[STATS] Could not delete upload message:",
-          error.message
-        );
-
-      }
-
     }
   );
 
