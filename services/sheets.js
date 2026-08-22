@@ -14,9 +14,14 @@ const GOOGLE_CREDENTIALS_PATH =
     "google-service-account.json"
   );
 
+
+// Support both variable names.
+// Railway should use GOOGLE_SHEETS_ID.
 const SPREADSHEET_ID =
+  process.env.GOOGLE_SHEETS_ID ||
   process.env.GOOGLE_SHEET_ID ||
   "1V_oL9Kkn4y_f0628pYkmsk7JLheHCHKpv2mTm3UXhHg";
+
 
 const MEMBERS_SHEET_NAME =
   "Members List";
@@ -40,14 +45,166 @@ const PLAYER_PROFILE_SHEET_NAME =
   "Player Profile";
 
 
-// IMPORTANT:
-// This MUST match the variable in .env
-//
-// APPS_SCRIPT_REFRESH_URL=https://script.google.com/macros/s/...../exec
-//
 const APPS_SCRIPT_REFRESH_URL =
   process.env.APPS_SCRIPT_REFRESH_URL;
 
+
+// ============================================================
+// GOOGLE CLIENT
+// ============================================================
+
+let sheetsClient = null;
+
+
+async function getGoogleSheets() {
+
+  if (
+    sheetsClient
+  ) {
+
+    return sheetsClient;
+
+  }
+
+
+  const {
+    google
+  } =
+    require("googleapis");
+
+
+  let credentials = null;
+
+
+  // ==========================================================
+  // OPTION 1:
+  // GOOGLE_SERVICE_ACCOUNT_JSON
+  //
+  // Used by Railway.
+  // ==========================================================
+
+  if (
+    process.env.GOOGLE_SERVICE_ACCOUNT_JSON
+  ) {
+
+    console.log(
+      "[SHEETS] Loading Google credentials from GOOGLE_SERVICE_ACCOUNT_JSON..."
+    );
+
+
+    try {
+
+      credentials =
+        JSON.parse(
+          process.env.GOOGLE_SERVICE_ACCOUNT_JSON
+        );
+
+    } catch (error) {
+
+      throw new Error(
+        "GOOGLE_SERVICE_ACCOUNT_JSON is not valid JSON: " +
+        error.message
+      );
+
+    }
+
+  }
+
+
+  // ==========================================================
+  // OPTION 2:
+  // Local credentials file
+  //
+  // Used on your Windows PC.
+  // ==========================================================
+
+  else if (
+    fs.existsSync(
+      GOOGLE_CREDENTIALS_PATH
+    )
+  ) {
+
+    console.log(
+      "[SHEETS] Loading Google credentials from:",
+      GOOGLE_CREDENTIALS_PATH
+    );
+
+
+    try {
+
+      credentials =
+        JSON.parse(
+          fs.readFileSync(
+            GOOGLE_CREDENTIALS_PATH,
+            "utf8"
+          )
+        );
+
+    } catch (error) {
+
+      throw new Error(
+        "Could not read Google service account credentials: " +
+        error.message
+      );
+
+    }
+
+  }
+
+
+  // ==========================================================
+  // NO CREDENTIALS
+  // ==========================================================
+
+  else {
+
+    throw new Error(
+      "Google service account credentials not found.\n" +
+      "For Railway, set GOOGLE_SERVICE_ACCOUNT_JSON.\n" +
+      "For local development, place google-service-account.json at:\n" +
+      GOOGLE_CREDENTIALS_PATH
+    );
+
+  }
+
+
+  // ==========================================================
+  // CREATE AUTH
+  // ==========================================================
+
+  const auth =
+    new google.auth.GoogleAuth({
+
+      credentials,
+
+      scopes: [
+
+        "https://www.googleapis.com/auth/spreadsheets"
+
+      ]
+
+    });
+
+
+  sheetsClient =
+    google.sheets({
+
+      version:
+        "v4",
+
+      auth
+
+    });
+
+
+  console.log(
+    "[SHEETS] Google Sheets client initialized."
+  );
+
+
+  return sheetsClient;
+
+}
 
 // ============================================================
 // DEFAULT CARD VALUE
@@ -107,7 +264,6 @@ const CARD_FIELDS = [
 // GOOGLE CLIENT
 // ============================================================
 
-let sheetsClient = null;
 
 
 async function getGoogleSheets() {
