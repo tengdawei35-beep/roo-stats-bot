@@ -39,16 +39,31 @@ const data =
 
 
 // ============================================================
-// REQUIRED STATS
+// REQUIRED STAT FIELDS
 // ============================================================
 //
 // Cards are intentionally NOT included.
 //
-// Cards are automatically written as "2-star" by sheets.js.
+// Cards are automatically set to 2-star by sheets.js.
 //
 // ============================================================
 
 const REQUIRED_STATS = [
+
+  {
+    key: "hp",
+    label: "HP"
+  },
+
+  {
+    key: "patk",
+    label: "PATK"
+  },
+
+  {
+    key: "matk",
+    label: "MATK"
+  },
 
   {
     key: "pdef",
@@ -62,12 +77,12 @@ const REQUIRED_STATS = [
 
   {
     key: "pvpBonus",
-    label: "PVP Dmg Bonus"
+    label: "PvP DMG Bonus"
   },
 
   {
     key: "pvpReduction",
-    label: "PVP Dmg Reduction"
+    label: "PvP DMG Reduction"
   },
 
   {
@@ -107,144 +122,275 @@ const REQUIRED_STATS = [
 
   {
     key: "mediumDamage",
-    label: "DMG vs Medium Enemies"
+    label: "Medium Damage"
   },
 
   {
     key: "mediumReduction",
-    label: "DMG Reduction vs Medium Enemies"
+    label: "Medium Reduction"
   },
 
   {
     key: "demiDamage",
-    label: "DMG vs Demi-Human"
+    label: "Demi-Human Damage"
   },
 
   {
     key: "demiReduction",
-    label: "DMG Reduction vs Demi-Human"
+    label: "Demi-Human Reduction"
   },
 
   {
     key: "equipmentPDEF",
-    label: "Equipment PDEF %"
+    label: "Equipment PDEF"
   },
 
   {
     key: "equipmentMDEF",
-    label: "Equipment MDEF %"
-  },
-
-  {
-    key: "patk",
-    label: "PATK"
-  },
-
-  {
-    key: "matk",
-    label: "MATK"
-  },
-
-  {
-    key: "hp",
-    label: "HP"
+    label: "Equipment MDEF"
   }
 
 ];
 
 
 // ============================================================
+// SUBMISSION QUEUE
+// ============================================================
+//
+// IMPORTANT:
+//
+// OCR is allowed to run concurrently.
+//
+// Google Sheets submission + Apps Script refresh is serialized.
+//
+// Example:
+//
+// User A OCR ────────────────┐
+//                            ▼
+// User B OCR ────────────────┐
+//                            ▼
+// User C OCR ────────────────┐
+//                            ▼
+//
+//                       Submission Queue
+//                            │
+//                 ┌──────────┴──────────┐
+//                 ▼                     ▼
+//             User A                User B
+//          Sheets + Refresh      Sheets + Refresh
+//                                        │
+//                                        ▼
+//                                      User C
+//
+// This prevents simultaneous Apps Script report rebuilds.
+//
+// ============================================================
+
+let submissionQueue =
+  Promise.resolve();
+
+
+function submitStatsQueued(
+  submission
+) {
+
+  const job =
+    submissionQueue.then(
+      async function() {
+
+        console.log(
+          "[STATS QUEUE] Starting submission for:",
+          submission.name
+        );
+
+        try {
+
+          return await submitStats(
+            submission
+          );
+
+        } finally {
+
+          console.log(
+            "[STATS QUEUE] Finished submission for:",
+            submission.name
+          );
+
+        }
+
+      }
+    );
+
+
+  /*
+   * Keep the queue alive even if one submission fails.
+   *
+   * The current job still receives the rejection because
+   * `job` is returned to the caller.
+   */
+
+  submissionQueue =
+    job.catch(
+      function(error) {
+
+        console.error(
+          "[STATS QUEUE] Job failed:",
+          error
+        );
+
+      }
+    );
+
+
+  return job;
+
+}
+
+
+// ============================================================
 // VALUE HELPERS
 // ============================================================
 
-function isFilled(value) {
-
-  if (value === 0) {
-    return true;
-  }
+function isFilled(
+  value
+) {
 
   if (
     value === null ||
     value === undefined
   ) {
+
     return false;
+
   }
 
+
   if (
-    typeof value === "string" &&
-    value.trim() === ""
+    typeof value === "string"
   ) {
-    return false;
+
+    return value.trim() !== "";
+
   }
+
+
+  /*
+   * 0 is a valid value.
+   *
+   * This is important for:
+   *
+   * Ignore PDEF: 0
+   * Ignore MDEF: 0
+   * etc.
+   */
 
   return true;
-}
-
-
-function getMissingStats(stats) {
-
-  return REQUIRED_STATS
-    .filter(
-      function(field) {
-
-        return !isFilled(
-          stats[field.key]
-        );
-
-      }
-    )
-    .map(
-      function(field) {
-
-        return field.label;
-
-      }
-    );
 
 }
 
 
-function formatValue(value) {
+// ============================================================
+// FORMAT VALUE
+// ============================================================
+
+function formatValue(
+  value
+) {
 
   if (
-    value === null ||
-    value === undefined ||
-    value === ""
+    !isFilled(
+      value
+    )
   ) {
 
-    return "❓ Missing";
+    return "Missing";
 
   }
 
-  return String(value);
+
+  return String(
+    value
+  );
 
 }
 
 
-function safeDiscordContent(content) {
+// ============================================================
+// FORMAT PERCENTAGE
+// ============================================================
 
-  const MAX_LENGTH = 1900;
+function formatPercent(
+  value
+) {
 
   if (
-    content.length <= MAX_LENGTH
+    !isFilled(
+      value
+    )
+  ) {
+
+    return "Missing";
+
+  }
+
+
+  return (
+    String(
+      value
+    ) +
+    "%"
+  );
+
+}
+
+
+// ============================================================
+// SAFE DISCORD CONTENT
+// ============================================================
+
+function safeDiscordContent(
+  content
+) {
+
+  const MAX_LENGTH =
+    1900;
+
+
+  if (
+    content.length <=
+    MAX_LENGTH
   ) {
 
     return content;
 
   }
 
+
   return (
+
     content.substring(
       0,
-      MAX_LENGTH - 100
+      MAX_LENGTH - 120
     ) +
-    "\n\n⚠️ Some information has been shortened."
+
+    "\n\n" +
+
+    "⚠️ Some information was shortened. " +
+
+    "Use **Edit** to review the fields."
+
   );
 
 }
 
 
-function parseManualNumber(value) {
+// ============================================================
+// PARSE MANUAL NUMBER
+// ============================================================
+
+function parseManualNumber(
+  value
+) {
 
   if (
     value === null ||
@@ -255,27 +401,52 @@ function parseManualNumber(value) {
 
   }
 
-  const text =
-    String(value)
-      .trim()
-      .replace(/,/g, "")
-      .replace(/%/g, "")
+
+  let text =
+    String(
+      value
+    )
       .trim();
 
-  if (!text) {
-    return null;
-  }
-
-  const number =
-    Number(text);
 
   if (
-    !Number.isFinite(number)
+    text === ""
   ) {
 
     return null;
 
   }
+
+
+  text =
+    text
+      .replace(
+        /,/g,
+        ""
+      )
+      .replace(
+        /%/g,
+        ""
+      )
+      .trim();
+
+
+  const number =
+    Number(
+      text
+    );
+
+
+  if (
+    !Number.isFinite(
+      number
+    )
+  ) {
+
+    return null;
+
+  }
+
 
   return number;
 
@@ -283,25 +454,97 @@ function parseManualNumber(value) {
 
 
 // ============================================================
-// JOB CLASS MENU
+// MISSING STATS
+// ============================================================
+
+function getMissingStats(
+  stats
+) {
+
+  const missing = [];
+
+
+  REQUIRED_STATS.forEach(
+    function(field) {
+
+      if (
+        !isFilled(
+          stats[
+            field.key
+          ]
+        )
+      ) {
+
+        missing.push(
+          field.label
+        );
+
+      }
+
+    }
+  );
+
+
+  return missing;
+
+}
+
+
+// ============================================================
+// FIND STAT FIELD
+// ============================================================
+
+function findStatField(
+  key
+) {
+
+  return REQUIRED_STATS.find(
+    function(field) {
+
+      return (
+        field.key ===
+        key
+      );
+
+    }
+  );
+
+}
+
+
+// ============================================================
+// BUILD JOB CLASS MENU
 // ============================================================
 
 function buildJobClassMenu() {
 
   const options =
     JOB_CLASSES
-      .slice(0, 25)
+      .slice(
+        0,
+        25
+      )
       .map(
         function(jobClass) {
 
           return new StringSelectMenuOptionBuilder()
 
             .setLabel(
-              String(jobClass).slice(0, 100)
+              String(
+                jobClass
+              ).slice(
+                0,
+                100
+              )
             )
 
             .setValue(
-              String(jobClass).slice(0, 100)
+              String(
+                jobClass
+              ).slice(
+                0,
+                100
+              )
             );
 
         }
@@ -318,9 +561,13 @@ function buildJobClassMenu() {
       "Select your job class"
     )
 
-    .setMinValues(1)
+    .setMinValues(
+      1
+    )
 
-    .setMaxValues(1)
+    .setMaxValues(
+      1
+    )
 
     .addOptions(
       options
@@ -330,51 +577,105 @@ function buildJobClassMenu() {
 
 
 // ============================================================
-// CONFIRMATION BUTTONS
+// BUILD CONFIRMATION BUTTONS
 // ============================================================
 
-function buildConfirmationButtons(token) {
+function buildConfirmationButtons(
+  token
+) {
+
+  const confirmButton =
+    new ButtonBuilder()
+
+      .setCustomId(
+        "stats_confirm_" +
+        token
+      )
+
+      .setLabel(
+        "Confirm"
+      )
+
+      .setStyle(
+        ButtonStyle.Success
+      );
+
+
+  const editButton =
+    new ButtonBuilder()
+
+      .setCustomId(
+        "stats_edit_" +
+        token
+      )
+
+      .setLabel(
+        "Edit"
+      )
+
+      .setStyle(
+        ButtonStyle.Secondary
+      );
+
 
   return new ActionRowBuilder()
     .addComponents(
-
-      new ButtonBuilder()
-
-        .setCustomId(
-          "stats_confirm_" +
-          token
-        )
-
-        .setLabel(
-          "Confirm"
-        )
-
-        .setStyle(
-          ButtonStyle.Success
-        ),
-
-      new ButtonBuilder()
-
-        .setCustomId(
-          "stats_edit_" +
-          token
-        )
-
-        .setLabel(
-          "Edit"
-        )
-
-        .setStyle(
-          ButtonStyle.Secondary
-        )
-
+      confirmButton,
+      editButton
     );
 
 }
 
 
 // ============================================================
-// EDIT MENU
+// BUILD EDIT GROUP MENU
+// ============================================================
+
+function buildEditGroupMenu(
+  token
+) {
+
+  const menu =
+    new StringSelectMenuBuilder()
+
+      .setCustomId(
+        "stats_edit_group_" +
+        token
+      )
+
+      .setPlaceholder(
+        "Choose what you want to edit"
+      )
+
+      .addOptions(
+
+        new StringSelectMenuOptionBuilder()
+
+          .setLabel(
+            "Stats"
+          )
+
+          .setDescription(
+            "Edit OCR-detected player stats"
+          )
+
+          .setValue(
+            "stats"
+          )
+
+      );
+
+
+  return new ActionRowBuilder()
+    .addComponents(
+      menu
+    );
+
+}
+
+
+// ============================================================
+// BUILD STATS EDIT MENU
 // ============================================================
 
 function buildStatsEditMenu(
@@ -398,15 +699,24 @@ function buildStatsEditMenu(
   REQUIRED_STATS.forEach(
     function(field) {
 
-      const value =
-        stats[field.key];
+      const current =
+        stats[
+          field.key
+        ];
 
 
       const description =
-        isFilled(value)
+        isFilled(
+          current
+        )
 
           ? "Current: " +
-            String(value).slice(0, 45)
+            String(
+              current
+            ).slice(
+              0,
+              45
+            )
 
           : "Currently missing";
 
@@ -416,11 +726,17 @@ function buildStatsEditMenu(
         new StringSelectMenuOptionBuilder()
 
           .setLabel(
-            field.label.slice(0, 100)
+            field.label.slice(
+              0,
+              100
+            )
           )
 
           .setDescription(
-            description.slice(0, 100)
+            description.slice(
+              0,
+              100
+            )
           )
 
           .setValue(
@@ -442,24 +758,7 @@ function buildStatsEditMenu(
 
 
 // ============================================================
-// FIND FIELD
-// ============================================================
-
-function findStatField(key) {
-
-  return REQUIRED_STATS.find(
-    function(field) {
-
-      return field.key === key;
-
-    }
-  );
-
-}
-
-
-// ============================================================
-// CONFIRMATION MESSAGE
+// BUILD COMPACT CONFIRMATION
 // ============================================================
 
 function buildConfirmationText(
@@ -474,83 +773,161 @@ function buildConfirmationText(
     "## 🔍 ROOC Stats Confirmation\n\n" +
 
     "**Name:** " +
-    formatValue(playerName) +
-    " **Class:** " +
-    formatValue(selectedClass) +
+    formatValue(
+      playerName
+    ) +
+
+    "\n" +
+
+    "**Class:** " +
+    formatValue(
+      selectedClass
+    ) +
+
     "\n\n" +
+
 
     "### General\n" +
 
     "HP: **" +
-    formatValue(stats.hp) +
+    formatValue(
+      stats.hp
+    ) +
+
     "** | PATK: **" +
-    formatValue(stats.patk) +
+    formatValue(
+      stats.patk
+    ) +
+
     "** | MATK: **" +
-    formatValue(stats.matk) +
+    formatValue(
+      stats.matk
+    ) +
+
     "**\n\n" +
+
 
     "### Defense\n" +
 
     "PDEF: **" +
-    formatValue(stats.pdef) +
+    formatValue(
+      stats.pdef
+    ) +
+
     "** | MDEF: **" +
-    formatValue(stats.mdef) +
+    formatValue(
+      stats.mdef
+    ) +
+
     "**\n\n" +
+
 
     "### Combat\n" +
 
     "PDMG: **" +
-    formatValue(stats.pdmg) +
-    "%** | MDMG: **" +
-    formatValue(stats.mdmg) +
-    "%**\n" +
+    formatPercent(
+      stats.pdmg
+    ) +
+
+    "** | MDMG: **" +
+    formatPercent(
+      stats.mdmg
+    ) +
+
+    "**\n" +
 
     "PDMG-R: **" +
-    formatValue(stats.pdmgReduction) +
-    "%** | MDMG-R: **" +
-    formatValue(stats.mdmgReduction) +
-    "%**\n" +
+    formatPercent(
+      stats.pdmgReduction
+    ) +
+
+    "** | MDMG-R: **" +
+    formatPercent(
+      stats.mdmgReduction
+    ) +
+
+    "**\n" +
 
     "Crit RES: **" +
-    formatValue(stats.critRes) +
+    formatValue(
+      stats.critRes
+    ) +
+
     "**\n" +
 
     "Ignore PDEF: **" +
-    formatValue(stats.ignorePDEF) +
+    formatValue(
+      stats.ignorePDEF
+    ) +
+
     "** | Ignore MDEF: **" +
-    formatValue(stats.ignoreMDEF) +
+    formatValue(
+      stats.ignoreMDEF
+    ) +
+
     "**\n\n" +
+
 
     "### PvP\n" +
 
     "Bonus: **" +
-    formatValue(stats.pvpBonus) +
+    formatValue(
+      stats.pvpBonus
+    ) +
+
     "** | Reduction: **" +
-    formatValue(stats.pvpReduction) +
+    formatValue(
+      stats.pvpReduction
+    ) +
+
     "**\n\n" +
+
 
     "### Target Damage\n" +
 
     "Medium: **" +
-    formatValue(stats.mediumDamage) +
-    "% / " +
-    formatValue(stats.mediumReduction) +
-    "%**\n" +
+    formatPercent(
+      stats.mediumDamage
+    ) +
+
+    " / " +
+    formatPercent(
+      stats.mediumReduction
+    ) +
+
+    "**\n" +
 
     "Demi-Human: **" +
-    formatValue(stats.demiDamage) +
-    "% / " +
-    formatValue(stats.demiReduction) +
-    "%**\n\n" +
+    formatPercent(
+      stats.demiDamage
+    ) +
+
+    " / " +
+    formatPercent(
+      stats.demiReduction
+    ) +
+
+    "**\n\n" +
+
 
     "### Equipment\n" +
 
     "PDEF: **" +
-    formatValue(stats.equipmentPDEF) +
-    "%** | MDEF: **" +
-    formatValue(stats.equipmentMDEF) +
-    "%**\n\n";
+    formatPercent(
+      stats.equipmentPDEF
+    ) +
 
+    "** | MDEF: **" +
+    formatPercent(
+      stats.equipmentMDEF
+    ) +
+
+    "**\n\n";
+
+
+  // ==========================================================
+  // VALIDATION
+  // ==========================================================
 
   if (
     missingStats.length === 0
@@ -560,9 +937,9 @@ function buildConfirmationText(
 
       "### ✅ Ready to Submit\n\n" +
 
-      "All required stats have been filled.\n\n" +
+      "All required stats have been detected.\n\n" +
 
-      "Cards will automatically be recorded as **2-star**.\n\n" +
+      "⚠️ **Please verify your stats before submitting.**\n\n" +
 
       "Press **Confirm** to submit.\n" +
 
@@ -574,21 +951,15 @@ function buildConfirmationText(
 
       "### ⚠️ Missing Information\n\n" +
 
-      "**Stats:**\n" +
+      "**Stats:** " +
 
-      missingStats
-        .map(
-          function(field) {
-
-            return "• " + field;
-
-          }
-        )
-        .join("\n") +
+      missingStats.join(
+        ", "
+      ) +
 
       "\n\n" +
 
-      "❌ **Submission is blocked until every required stat has a value.**\n\n" +
+      "❌ **Submission is blocked until all required stats have a value.**\n\n" +
 
       "Press **Edit** to enter the missing values.";
 
@@ -601,347 +972,6 @@ function buildConfirmationText(
 
 
 // ============================================================
-// FINAL REFRESHED MESSAGE
-// ============================================================
-
-function buildFinalMessage(
-  stats,
-  refreshedPlayer,
-  playerName,
-  selectedClass,
-  refreshSucceeded,
-  refreshError
-) {
-
-  const profile =
-    refreshedPlayer || {};
-
-
-  function profileValue(
-    aliases,
-    fallback
-  ) {
-
-    const keys =
-      Object.keys(profile);
-
-
-    for (
-      const alias of aliases
-    ) {
-
-      const normalizedAlias =
-        String(alias)
-          .trim()
-          .toLowerCase();
-
-
-      const matchingKey =
-        keys.find(
-          function(key) {
-
-            return (
-              String(key)
-                .trim()
-                .toLowerCase() ===
-              normalizedAlias
-            );
-
-          }
-        );
-
-
-      if (
-        matchingKey !== undefined &&
-        profile[matchingKey] !== ""
-      ) {
-
-        return profile[matchingKey];
-
-      }
-
-    }
-
-
-    return fallback;
-
-  }
-
-
-  const hp =
-    profileValue(
-      ["HP"],
-      stats.hp
-    );
-
-  const patk =
-    profileValue(
-      ["PATK"],
-      stats.patk
-    );
-
-  const matk =
-    profileValue(
-      ["MATK"],
-      stats.matk
-    );
-
-  const pdef =
-    profileValue(
-      ["PDEF (w/o buffs)", "PDEF"],
-      stats.pdef
-    );
-
-  const mdef =
-    profileValue(
-      ["MDEF (w/o buffs)", "MDEF"],
-      stats.mdef
-    );
-
-  const pdmg =
-    profileValue(
-      ["PDMG %", "PDMG"],
-      stats.pdmg
-    );
-
-  const mdmg =
-    profileValue(
-      ["MDMG %", "MDMG"],
-      stats.mdmg
-    );
-
-  const pdmgReduction =
-    profileValue(
-      ["PDMG Reduction", "PDMG Reduction %"],
-      stats.pdmgReduction
-    );
-
-  const mdmgReduction =
-    profileValue(
-      ["MDMG Reduction", "MDMG Reduction %"],
-      stats.mdmgReduction
-    );
-
-  const critRes =
-    profileValue(
-      ["Crit RES", "Crit Res"],
-      stats.critRes
-    );
-
-  const ignorePDEF =
-    profileValue(
-      ["Ignore PDEF"],
-      stats.ignorePDEF
-    );
-
-  const ignoreMDEF =
-    profileValue(
-      ["Ignore MDEF"],
-      stats.ignoreMDEF
-    );
-
-  const pvpBonus =
-    profileValue(
-      [
-        "PVP Dmg Bonus",
-        "PvP Dmg Bonus",
-        "PVP DMG Bonus",
-        "PvP DMG Bonus"
-      ],
-      stats.pvpBonus
-    );
-
-  const pvpReduction =
-    profileValue(
-      [
-        "PVP Dmg Reduction",
-        "PvP Dmg Reduction",
-        "PVP DMG Reduction",
-        "PvP DMG Reduction"
-      ],
-      stats.pvpReduction
-    );
-
-  const mediumDamage =
-    profileValue(
-      [
-        "Medium Damage",
-        "DMG vs Medium Enemies"
-      ],
-      stats.mediumDamage
-    );
-
-  const mediumReduction =
-    profileValue(
-      [
-        "Medium Reduction",
-        "DMG Reduction vs Medium Enemies"
-      ],
-      stats.mediumReduction
-    );
-
-  const demiDamage =
-    profileValue(
-      [
-        "Demi-Human Damage",
-        "DMG vs Demi-Human"
-      ],
-      stats.demiDamage
-    );
-
-  const demiReduction =
-    profileValue(
-      [
-        "Demi-Human Reduction",
-        "DMG Reduction vs Demi-Human"
-      ],
-      stats.demiReduction
-    );
-
-  const equipmentPDEF =
-    profileValue(
-      [
-        "Equipment PDEF",
-        "Equipment PDEF %"
-      ],
-      stats.equipmentPDEF
-    );
-
-  const equipmentMDEF =
-    profileValue(
-      [
-        "Equipment MDEF",
-        "Equipment MDEF %"
-      ],
-      stats.equipmentMDEF
-    );
-
-
-  let content =
-
-    "## ✅ ROOC Stats Updated\n\n" +
-
-    "**Name:** " +
-    playerName +
-    " **Class:** " +
-    selectedClass +
-    "\n\n" +
-
-    "### General\n" +
-
-    "HP: **" +
-    formatValue(hp) +
-    "** | PATK: **" +
-    formatValue(patk) +
-    "** | MATK: **" +
-    formatValue(matk) +
-    "**\n\n" +
-
-    "### Defense\n" +
-
-    "PDEF: **" +
-    formatValue(pdef) +
-    "** | MDEF: **" +
-    formatValue(mdef) +
-    "**\n\n" +
-
-    "### Combat\n" +
-
-    "PDMG: **" +
-    formatValue(pdmg) +
-    "%** | MDMG: **" +
-    formatValue(mdmg) +
-    "%**\n" +
-
-    "PDMG-R: **" +
-    formatValue(pdmgReduction) +
-    "%** | MDMG-R: **" +
-    formatValue(mdmgReduction) +
-    "%**\n" +
-
-    "Crit RES: **" +
-    formatValue(critRes) +
-    "**\n" +
-
-    "Ignore PDEF: **" +
-    formatValue(ignorePDEF) +
-    "** | Ignore MDEF: **" +
-    formatValue(ignoreMDEF) +
-    "**\n\n" +
-
-    "### PvP\n" +
-
-    "Bonus: **" +
-    formatValue(pvpBonus) +
-    "** | Reduction: **" +
-    formatValue(pvpReduction) +
-    "**\n\n" +
-
-    "### Target Damage\n" +
-
-    "Medium: **" +
-    formatValue(mediumDamage) +
-    "% / " +
-    formatValue(mediumReduction) +
-    "%**\n" +
-
-    "Demi-Human: **" +
-    formatValue(demiDamage) +
-    "% / " +
-    formatValue(demiReduction) +
-    "%**\n\n" +
-
-    "### Equipment\n" +
-
-    "PDEF: **" +
-    formatValue(equipmentPDEF) +
-    "%** | MDEF: **" +
-    formatValue(equipmentMDEF) +
-    "%**\n\n";
-
-
-  if (
-    refreshSucceeded
-  ) {
-
-    content +=
-
-      "✅ **Stats Submission updated**\n" +
-      "✅ **Reports refreshed**\n" +
-      "✅ **Cards set to 2-star**";
-
-  } else {
-
-    content +=
-
-      "⚠️ **Stats were submitted, but the reports could not be refreshed.**\n\n" +
-      "Please contact an administrator.";
-
-    if (
-      refreshError
-    ) {
-
-      content +=
-
-        "\n\n`" +
-        String(
-          refreshError
-        ).slice(0, 300) +
-        "`";
-
-    }
-
-  }
-
-
-  return safeDiscordContent(
-    content
-  );
-
-}
-
-
-// ============================================================
 // EXECUTE
 // ============================================================
 
@@ -949,14 +979,34 @@ async function execute(
   interaction
 ) {
 
+  const userId =
+    interaction.user.id;
+
+
+  const discordUsername =
+    interaction.user.username;
+
+
+  console.log(
+    "[STATS] Starting /stats for:",
+    interaction.user.tag,
+    "| ID:",
+    userId
+  );
+
+
   // ==========================================================
   // JOB CLASS
   // ==========================================================
 
+  const jobMenu =
+    buildJobClassMenu();
+
+
   const jobRow =
     new ActionRowBuilder()
       .addComponents(
-        buildJobClassMenu()
+        jobMenu
       );
 
 
@@ -986,6 +1036,7 @@ async function execute(
 
   let selection;
 
+
   try {
 
     selection =
@@ -1001,11 +1052,13 @@ async function execute(
           function(componentInteraction) {
 
             return (
+
               componentInteraction.user.id ===
-              interaction.user.id &&
+              userId &&
 
               componentInteraction.customId ===
               "stats_job_class"
+
             );
 
           }
@@ -1017,7 +1070,9 @@ async function execute(
     await interaction.editReply({
 
       content:
+
         "⏱️ Job class selection timed out.\n\n" +
+
         "Please run `/stats` again.",
 
       components: []
@@ -1034,7 +1089,7 @@ async function execute(
 
 
   // ==========================================================
-  // ASK FOR SCREENSHOTS
+  // UPDATE TO UPLOAD SCREEN
   // ==========================================================
 
   await selection.update({
@@ -1045,6 +1100,7 @@ async function execute(
 
       "**Job Class:** " +
       selectedClass +
+
       "\n\n" +
 
       "### 📸 Upload your screenshots\n\n" +
@@ -1053,13 +1109,19 @@ async function execute(
 
       "You may attach multiple screenshots to the same message.\n\n" +
 
-      "Required screenshots should include:\n" +
+      "Required information should include:\n" +
 
       "• General Stats\n" +
-      "• Combat / Quasi-Stats\n" +
-      "• Equipment Stats\n" +
+
+      "• Quasi-Stats\n" +
+
+      "• Equipment / Damage Stats\n" +
+
       "• PDEF Notice\n" +
+
       "• MDEF Notice\n\n" +
+
+      "ℹ️ **Card information is not required. Cards will automatically be recorded as 2-star.**\n\n" +
 
       "⏱️ You have **2 minutes** to upload your screenshots.",
 
@@ -1069,11 +1131,22 @@ async function execute(
 
 
   // ==========================================================
-  // SCREENSHOT COLLECTOR
+  // UPLOAD COLLECTOR
+  // ==========================================================
+  //
+  // This collector belongs ONLY to this /stats session.
+  //
+  // Multiple users can therefore have collectors running
+  // simultaneously.
+  //
   // ==========================================================
 
+  const channel =
+    interaction.channel;
+
+
   const collector =
-    interaction.channel.createMessageCollector({
+    channel.createMessageCollector({
 
       time:
         120000,
@@ -1081,9 +1154,14 @@ async function execute(
       filter:
         function(message) {
 
+          /*
+           * Only accept messages from the user who invoked
+           * this particular /stats session.
+           */
+
           return (
             message.author.id ===
-            interaction.user.id
+            userId
           );
 
         }
@@ -1095,6 +1173,20 @@ async function execute(
     "collect",
     async function(message) {
 
+      console.log(
+        "[STATS] Screenshot message received:",
+        message.id,
+        "| User:",
+        message.author.tag,
+        "| Attachments:",
+        message.attachments.size
+      );
+
+
+      // ------------------------------------------------------
+      // IGNORE MESSAGES WITHOUT ATTACHMENTS
+      // ------------------------------------------------------
+
       if (
         message.attachments.size === 0
       ) {
@@ -1104,10 +1196,20 @@ async function execute(
       }
 
 
+      /*
+       * Stop ONLY this user's collector.
+       *
+       * Other /stats sessions have their own collectors.
+       */
+
       collector.stop(
         "screenshots_received"
       );
 
+
+      // ------------------------------------------------------
+      // FIND IMAGES
+      // ------------------------------------------------------
 
       const imageAttachments =
         [
@@ -1118,26 +1220,44 @@ async function execute(
 
             const filename =
               String(
-                attachment.name || ""
+                attachment.name ||
+                ""
               ).toLowerCase();
+
 
             const contentType =
               String(
-                attachment.contentType || ""
+                attachment.contentType ||
+                ""
               ).toLowerCase();
 
 
-            return (
-              /\.(png|jpg|jpeg|webp|gif)$/i.test(
-                filename
-              ) ||
+            const extensionIsImage =
+              /\.(png|jpg|jpeg|webp|gif)$/i
+                .test(
+                  filename
+                );
+
+
+            const contentTypeIsImage =
               contentType.startsWith(
                 "image/"
-              )
+              );
+
+
+            return (
+              extensionIsImage ||
+              contentTypeIsImage
             );
 
           }
         );
+
+
+      console.log(
+        "[STATS] Image count:",
+        imageAttachments.length
+      );
 
 
       if (
@@ -1147,17 +1267,25 @@ async function execute(
         await interaction.followUp({
 
           content:
-            "❌ I couldn't identify any image files in that message.",
+
+            "❌ I received your message, but couldn't identify any image files.\n\n" +
+
+            "Please upload PNG, JPG, JPEG or WEBP screenshots.",
 
           flags:
             MessageFlags.Ephemeral
 
         });
 
+
         return;
 
       }
 
+
+      // ------------------------------------------------------
+      // OCR STATUS
+      // ------------------------------------------------------
 
       await interaction.followUp({
 
@@ -1167,7 +1295,9 @@ async function execute(
           imageAttachments.length +
           "** screenshot(s).\n\n" +
 
-          "Reading your stats...",
+          "Reading your stats...\n\n" +
+
+          "This may take a little while.",
 
         flags:
           MessageFlags.Ephemeral
@@ -1178,16 +1308,19 @@ async function execute(
       const imageUrls =
         imageAttachments.map(
           function(attachment) {
+
             return attachment.url;
+
           }
         );
 
 
-      // ======================================================
+      // ------------------------------------------------------
       // OCR
-      // ======================================================
+      // ------------------------------------------------------
 
       let stats;
+
 
       try {
 
@@ -1203,16 +1336,20 @@ async function execute(
           error
         );
 
+
         await interaction.followUp({
 
           content:
-            "❌ OCR failed while reading the screenshots.\n\n" +
+
+            "❌ The screenshots were received, but OCR failed.\n\n" +
+
             "Please try again with clearer screenshots.",
 
           flags:
             MessageFlags.Ephemeral
 
         });
+
 
         return;
 
@@ -1225,15 +1362,12 @@ async function execute(
       );
 
 
-      // ======================================================
-      // MEMBER LOOKUP
-      // ======================================================
-
-      const discordUsername =
-        interaction.user.username;
-
+      // ------------------------------------------------------
+      // PLAYER LOOKUP
+      // ------------------------------------------------------
 
       let member;
+
 
       try {
 
@@ -1249,22 +1383,29 @@ async function execute(
           error
         );
 
+
         await interaction.followUp({
 
           content:
-            "❌ I couldn't access the Members List right now.",
+
+            "❌ I couldn't access the Members List right now.\n\n" +
+
+            "Please try again later or contact an administrator.",
 
           flags:
             MessageFlags.Ephemeral
 
         });
 
+
         return;
 
       }
 
 
-      if (!member) {
+      if (
+        !member
+      ) {
 
         await interaction.followUp({
 
@@ -1272,17 +1413,28 @@ async function execute(
 
             "❌ Your Discord username is not linked to a player in the **Members List**.\n\n" +
 
-            "Please contact an administrator.",
+            "Please contact an administrator to have your Discord username linked.",
 
           flags:
             MessageFlags.Ephemeral
 
         });
 
+
         return;
 
       }
 
+
+      console.log(
+        "[STATS] Member found:",
+        member
+      );
+
+
+      // ------------------------------------------------------
+      // PLAYER NAME
+      // ------------------------------------------------------
 
       const playerName =
         member.name ||
@@ -1290,76 +1442,114 @@ async function execute(
         "";
 
 
-      // ======================================================
-      // VALIDATE
-      // ======================================================
+      // ------------------------------------------------------
+      // VALIDATION
+      // ------------------------------------------------------
 
-      let missingStats =
+      const missingStats =
         getMissingStats(
           stats
         );
 
 
-      // ======================================================
+      // ------------------------------------------------------
       // UNIQUE TOKEN
-      // ======================================================
+      // ------------------------------------------------------
 
       const token =
-        Date.now().toString(36) +
+        Date.now().toString(
+          36
+        ) +
+
         "_" +
-        interaction.user.id.slice(-8);
+
+        userId.slice(
+          -8
+        ) +
+
+        "_" +
+
+        Math.random()
+          .toString(
+            36
+          )
+          .slice(
+            2,
+            8
+          );
 
 
-      // ======================================================
+      // ------------------------------------------------------
       // CONFIRMATION
-      // ======================================================
+      // ------------------------------------------------------
 
       const confirmationContent =
         safeDiscordContent(
 
           buildConfirmationText(
+
             stats,
+
             playerName,
+
             selectedClass,
+
             missingStats
+
           )
 
         );
 
 
-      /*
-       * IMPORTANT:
-       *
-       * This remains ephemeral.
-       *
-       * We keep the returned message ID and later edit it
-       * using interaction.webhook.editMessage().
-       */
+      let confirmationMessage;
 
-      const confirmationMessage =
-        await interaction.followUp({
 
-          content:
-            confirmationContent,
+      try {
 
-          components: [
-            buildConfirmationButtons(
-              token
-            )
-          ],
+        confirmationMessage =
+          await interaction.followUp({
 
-          flags:
-            MessageFlags.Ephemeral,
+            content:
+              confirmationContent,
 
-          fetchReply:
-            true
+            components: [
 
-        });
+              buildConfirmationButtons(
+                token
+              )
+
+            ],
+
+            flags:
+              MessageFlags.Ephemeral,
+
+            fetchReply:
+              true
+
+          });
+
+      } catch (error) {
+
+        console.error(
+          "[STATS] Could not create confirmation:",
+          error
+        );
+
+
+        return;
+
+      }
 
 
       console.log(
-        "[STATS] Confirmation message ID:",
+        "[STATS] Confirmation message created:",
         confirmationMessage.id
+      );
+
+
+      console.log(
+        "[STATS] Confirmation token:",
+        token
       );
 
 
@@ -1378,7 +1568,7 @@ async function execute(
 
               return (
                 componentInteraction.user.id ===
-                interaction.user.id
+                userId
               );
 
             }
@@ -1390,6 +1580,14 @@ async function execute(
         "collect",
         async function(componentInteraction) {
 
+          console.log(
+            "[STATS] Confirmation component:",
+            componentInteraction.customId,
+            "| User:",
+            componentInteraction.user.tag
+          );
+
+
           // ==================================================
           // CONFIRM
           // ==================================================
@@ -1400,34 +1598,37 @@ async function execute(
             token
           ) {
 
-            missingStats =
+            // ------------------------------------------------
+            // FINAL VALIDATION
+            // ------------------------------------------------
+
+            const finalMissingStats =
               getMissingStats(
                 stats
               );
 
 
             if (
-              missingStats.length > 0
+              finalMissingStats.length > 0
             ) {
 
               await componentInteraction.reply({
 
                 content:
+
                   safeDiscordContent(
 
                     "❌ **Submission blocked.**\n\n" +
 
-                    "The following required stats are still missing:\n\n" +
+                    "**Missing Stats:** " +
 
-                    missingStats
-                      .map(
-                        function(field) {
+                    finalMissingStats.join(
+                      ", "
+                    ) +
 
-                          return "• " + field;
+                    "\n\n" +
 
-                        }
-                      )
-                      .join("\n")
+                    "Press **Edit** to enter the missing values."
 
                   ),
 
@@ -1436,25 +1637,6 @@ async function execute(
 
               });
 
-              return;
-
-            }
-
-
-            // ------------------------------------------------
-            // ACKNOWLEDGE BUTTON
-            // ------------------------------------------------
-
-            try {
-
-              await componentInteraction.deferUpdate();
-
-            } catch (error) {
-
-              console.error(
-                "[STATS] Could not acknowledge Confirm button:",
-                error
-              );
 
               return;
 
@@ -1464,65 +1646,316 @@ async function execute(
             // ------------------------------------------------
             // REMOVE BUTTONS IMMEDIATELY
             // ------------------------------------------------
-            //
-            // Because this is an ephemeral follow-up, use
-            // the interaction webhook rather than
-            // confirmationMessage.edit().
-            //
 
             try {
 
-              await interaction.webhook.editMessage(
+              await componentInteraction.update({
 
-                confirmationMessage.id,
+                content:
 
-                {
+                  safeDiscordContent(
 
-                  content:
+                    buildConfirmationText(
 
-                    safeDiscordContent(
+                      stats,
 
-                      buildConfirmationText(
-                        stats,
-                        playerName,
-                        selectedClass,
-                        []
-                      )
+                      playerName,
 
-                    ) +
+                      selectedClass,
 
-                    "\n\n⏳ **Submitting stats and refreshing reports...**",
+                      []
 
-                  components: []
+                    )
 
-                }
+                  ) +
 
-              );
+                  "\n\n" +
+
+                  "⏳ **Submission queued...**",
+
+                components: []
+
+              });
 
             } catch (error) {
 
               console.error(
-                "[STATS] Could not update processing message:",
+                "[STATS] Could not update confirmation:",
                 error
               );
+
+
+              return;
 
             }
 
 
             // ------------------------------------------------
-            // SUBMIT TO SHEETS
+            // BUILD SUBMISSION
             // ------------------------------------------------
 
-            let submissionResult;
+            const submission = {
+
+              discordUsername:
+                discordUsername,
+
+              discordId:
+                userId,
+
+              name:
+                playerName,
+
+              jobClass:
+                selectedClass,
+
+              jobClassFirst:
+                selectedClass,
+
+              jobClassSecond:
+                "",
+
+              jobClassThird:
+                "",
+
+              stats:
+                stats
+
+            };
+
+
+            console.log(
+              "[STATS] Final submission:"
+            );
+
+
+            console.log(
+              JSON.stringify(
+                submission,
+                null,
+                2
+              )
+            );
+
+
+            // ------------------------------------------------
+            // SERIALIZED SUBMISSION
+            // ------------------------------------------------
 
             try {
 
-              submissionResult =
-                await submitStats(
-                  member,
-                  selectedClass,
-                  stats
+              console.log(
+                "[STATS QUEUE] Queuing:",
+                playerName
+              );
+
+
+              const result =
+                await submitStatsQueued(
+                  submission
                 );
+
+
+              console.log(
+                "[STATS] Stats successfully submitted:",
+                playerName
+              );
+
+
+              // ------------------------------------------------
+              // RESULT MESSAGE
+              // ------------------------------------------------
+
+              let successMessage =
+
+                "## ✅ ROOC Stats Updated\n\n" +
+
+                "**Name:** " +
+                playerName +
+
+                " **Class:** " +
+                selectedClass +
+
+                "\n\n" +
+
+                "### General\n" +
+
+                "HP: **" +
+                formatValue(
+                  stats.hp
+                ) +
+
+                "** | PATK: **" +
+                formatValue(
+                  stats.patk
+                ) +
+
+                "** | MATK: **" +
+                formatValue(
+                  stats.matk
+                ) +
+
+                "**\n\n" +
+
+                "### Defense\n" +
+
+                "PDEF: **" +
+                formatValue(
+                  stats.pdef
+                ) +
+
+                "** | MDEF: **" +
+                formatValue(
+                  stats.mdef
+                ) +
+
+                "**\n\n" +
+
+                "### Combat\n" +
+
+                "PDMG: **" +
+                formatPercent(
+                  stats.pdmg
+                ) +
+
+                "** | MDMG: **" +
+                formatPercent(
+                  stats.mdmg
+                ) +
+
+                "**\n" +
+
+                "PDMG-R: **" +
+                formatPercent(
+                  stats.pdmgReduction
+                ) +
+
+                "** | MDMG-R: **" +
+                formatPercent(
+                  stats.mdmgReduction
+                ) +
+
+                "**\n" +
+
+                "Crit RES: **" +
+                formatValue(
+                  stats.critRes
+                ) +
+
+                "**\n" +
+
+                "Ignore PDEF: **" +
+                formatValue(
+                  stats.ignorePDEF
+                ) +
+
+                "** | Ignore MDEF: **" +
+                formatValue(
+                  stats.ignoreMDEF
+                ) +
+
+                "**\n\n" +
+
+                "### PvP\n" +
+
+                "Bonus: **" +
+                formatValue(
+                  stats.pvpBonus
+                ) +
+
+                "** | Reduction: **" +
+                formatValue(
+                  stats.pvpReduction
+                ) +
+
+                "**\n\n" +
+
+                "### Target Damage\n" +
+
+                "Medium: **" +
+                formatPercent(
+                  stats.mediumDamage
+                ) +
+
+                " / " +
+                formatPercent(
+                  stats.mediumReduction
+                ) +
+
+                "**\n" +
+
+                "Demi-Human: **" +
+                formatPercent(
+                  stats.demiDamage
+                ) +
+
+                " / " +
+                formatPercent(
+                  stats.demiReduction
+                ) +
+
+                "**\n\n" +
+
+                "### Equipment\n" +
+
+                "PDEF: **" +
+                formatPercent(
+                  stats.equipmentPDEF
+                ) +
+
+                "** | MDEF: **" +
+                formatPercent(
+                  stats.equipmentMDEF
+                ) +
+
+                "**\n\n" +
+
+                "✅ **Stats Submission updated**\n" +
+
+                "✅ **Cards set to 2-star**";
+
+
+              if (
+                result &&
+                result.reportsRefreshed === false
+              ) {
+
+                successMessage +=
+
+                  "\n⚠️ **Reports could not be refreshed.** " +
+
+                  "The Stats Submission itself was written successfully.";
+
+              } else {
+
+                successMessage +=
+
+                  "\n✅ **Reports refreshed**";
+
+              }
+
+
+              try {
+
+                await interaction.editReply({
+
+                  content:
+                    safeDiscordContent(
+                      successMessage
+                    ),
+
+                  components: []
+
+                });
+
+              } catch (error) {
+
+                console.error(
+                  "[STATS] Could not update final confirmation:",
+                  error
+                );
+
+              }
+
 
             } catch (error) {
 
@@ -1532,141 +1965,29 @@ async function execute(
               );
 
 
-              const errorMessage =
-
-                "## ❌ Stats Submission Failed\n\n" +
-
-                "The submission could not be completed.\n\n" +
-
-                "`" +
-                String(
-                  error.message ||
-                  error
-                ).slice(0, 500) +
-                "`";
-
-
               try {
 
-                await interaction.webhook.editMessage(
+                await interaction.editReply({
 
-                  confirmationMessage.id,
+                  content:
 
-                  {
+                    "## ❌ Stats Submission Failed\n\n" +
 
-                    content:
-                      safeDiscordContent(
-                        errorMessage
-                      ),
+                    "The stats could not be written to Google Sheets.\n\n" +
 
-                    components: []
+                    "Please contact an administrator.\n\n" +
 
-                  }
+                    "The submission was **not automatically retried** to prevent duplicate records.",
 
-                );
+                  components: []
+
+                });
 
               } catch (editError) {
 
                 console.error(
-                  "[STATS] Could not update failed submission message:",
+                  "[STATS] Could not update failed confirmation:",
                   editError
-                );
-
-              }
-
-
-              confirmationCollector.stop(
-                "submission_failed"
-              );
-
-              return;
-
-            }
-
-
-            // ------------------------------------------------
-            // FINAL MESSAGE
-            // ------------------------------------------------
-
-            const finalMessage =
-              buildFinalMessage(
-
-                stats,
-
-                submissionResult
-                  ? submissionResult.refreshedPlayer
-                  : null,
-
-                playerName,
-
-                selectedClass,
-
-                submissionResult
-                  ? submissionResult.reportsRefreshed
-                  : false,
-
-                submissionResult
-                  ? submissionResult.refreshError
-                  : null
-
-              );
-
-
-            // ------------------------------------------------
-            // UPDATE SAME EPHEMERAL MESSAGE
-            // ------------------------------------------------
-
-            try {
-
-              await interaction.webhook.editMessage(
-
-                confirmationMessage.id,
-
-                {
-
-                  content:
-                    finalMessage,
-
-                  components: []
-
-                }
-
-              );
-
-
-              console.log(
-                "[STATS] Final refreshed message displayed."
-              );
-
-            } catch (error) {
-
-              console.error(
-                "[STATS] Could not update confirmation message:",
-                error
-              );
-
-
-              // ------------------------------------------------
-              // FALLBACK
-              // ------------------------------------------------
-
-              try {
-
-                await interaction.followUp({
-
-                  content:
-                    finalMessage,
-
-                  flags:
-                    MessageFlags.Ephemeral
-
-                });
-
-              } catch (fallbackError) {
-
-                console.error(
-                  "[STATS] Final Discord fallback failed:",
-                  fallbackError
                 );
 
               }
@@ -1677,6 +1998,25 @@ async function execute(
             confirmationCollector.stop(
               "submitted"
             );
+
+
+            // ------------------------------------------------
+            // DELETE SCREENSHOT MESSAGE
+            // ------------------------------------------------
+
+            try {
+
+              await message.delete();
+
+            } catch (error) {
+
+              console.log(
+                "[STATS] Could not delete upload message:",
+                error.message
+              );
+
+            }
+
 
             return;
 
@@ -1699,9 +2039,7 @@ async function execute(
 
                 "## ✏️ Edit Stats\n\n" +
 
-                "Select a stat to edit.\n\n" +
-
-                "Cards are automatically set to **2-star**.",
+                "Choose the stat you want to edit.",
 
               components: [
 
@@ -1714,13 +2052,60 @@ async function execute(
 
             });
 
+
             return;
 
           }
 
 
           // ==================================================
-          // SELECT STAT TO EDIT
+          // EDIT GROUP
+          // ==================================================
+
+          if (
+            componentInteraction.customId ===
+            "stats_edit_group_" +
+            token
+          ) {
+
+            const group =
+              componentInteraction.values[0];
+
+
+            if (
+              group ===
+              "stats"
+            ) {
+
+              await componentInteraction.update({
+
+                content:
+
+                  "## ✏️ Edit Stats\n\n" +
+
+                  "Select the stat you want to edit.",
+
+                components: [
+
+                  buildStatsEditMenu(
+                    token,
+                    stats
+                  )
+
+                ]
+
+              });
+
+
+              return;
+
+            }
+
+          }
+
+
+          // ==================================================
+          // EDIT STAT FIELD
           // ==================================================
 
           if (
@@ -1739,7 +2124,9 @@ async function execute(
               );
 
 
-            if (!field) {
+            if (
+              !field
+            ) {
 
               await componentInteraction.reply({
 
@@ -1751,6 +2138,7 @@ async function execute(
 
               });
 
+
               return;
 
             }
@@ -1760,9 +2148,11 @@ async function execute(
               isFilled(
                 stats[key]
               )
+
                 ? String(
                     stats[key]
                   )
+
                 : "";
 
 
@@ -1790,7 +2180,10 @@ async function execute(
                 )
 
                 .setLabel(
-                  field.label.slice(0, 45)
+                  field.label.slice(
+                    0,
+                    45
+                  )
                 )
 
                 .setStyle(
@@ -1806,7 +2199,9 @@ async function execute(
                 );
 
 
-            if (currentValue) {
+            if (
+              currentValue !== ""
+            ) {
 
               input.setValue(
                 currentValue
@@ -1832,6 +2227,7 @@ async function execute(
 
             let modalInteraction;
 
+
             try {
 
               modalInteraction =
@@ -1844,14 +2240,16 @@ async function execute(
                     function(modalSubmit) {
 
                       return (
+
                         modalSubmit.user.id ===
-                        interaction.user.id &&
+                        userId &&
 
                         modalSubmit.customId ===
                         "stats_modal_" +
                         token +
                         "_" +
                         key
+
                       );
 
                     }
@@ -1859,6 +2257,11 @@ async function execute(
                 });
 
             } catch (error) {
+
+              console.log(
+                "[STATS] Stat edit modal timed out."
+              );
+
 
               return;
 
@@ -1894,6 +2297,7 @@ async function execute(
 
               });
 
+
               return;
 
             }
@@ -1904,48 +2308,59 @@ async function execute(
 
 
             console.log(
-              "[STATS] Manual edit:",
+              "[STATS] Manual stat edit:",
               key,
               "=",
               parsed
             );
 
 
-            missingStats =
+            const updatedMissingStats =
               getMissingStats(
                 stats
               );
 
 
-            /*
-             * The modal submission is the active interaction,
-             * so update the ephemeral confirmation using
-             * update().
-             */
+            try {
 
-            await modalInteraction.update({
+              await modalInteraction.update({
 
-              content:
-                safeDiscordContent(
+                content:
 
-                  buildConfirmationText(
-                    stats,
-                    playerName,
-                    selectedClass,
-                    missingStats
+                  safeDiscordContent(
+
+                    buildConfirmationText(
+
+                      stats,
+
+                      playerName,
+
+                      selectedClass,
+
+                      updatedMissingStats
+
+                    )
+
+                  ),
+
+                components: [
+
+                  buildConfirmationButtons(
+                    token
                   )
 
-                ),
+                ]
 
-              components: [
+              });
 
-                buildConfirmationButtons(
-                  token
-                )
+            } catch (error) {
 
-              ]
+              console.error(
+                "[STATS] Could not update after stat edit:",
+                error
+              );
 
-            });
+            }
 
 
             return;
@@ -1957,17 +2372,45 @@ async function execute(
 
 
       // ======================================================
-      // DELETE SCREENSHOT MESSAGE
+      // CONFIRMATION COLLECTOR END
       // ======================================================
+
+      confirmationCollector.on(
+        "end",
+        function(
+          collected,
+          reason
+        ) {
+
+          console.log(
+            "[STATS] Confirmation collector ended:",
+            reason,
+            "interactions:",
+            collected.size,
+            "| Player:",
+            playerName
+          );
+
+        }
+      );
+
+
+      // ------------------------------------------------------
+      // DELETE UPLOAD MESSAGE
+      // ------------------------------------------------------
 
       try {
 
         await message.delete();
 
+        console.log(
+          "[STATS] Upload message deleted."
+        );
+
       } catch (error) {
 
         console.log(
-          "[STATS] Could not delete screenshot message:",
+          "[STATS] Could not delete upload message:",
           error.message
         );
 
@@ -1989,10 +2432,12 @@ async function execute(
     ) {
 
       console.log(
-        "[STATS] Screenshot collector ended:",
+        "[STATS] Upload collector ended:",
         reason,
-        "| messages:",
-        collected.size
+        "messages:",
+        collected.size,
+        "| User:",
+        userId
       );
 
     }
