@@ -1,13 +1,62 @@
-const { createWorker } = require("tesseract.js");
-const sharp = require("sharp");
-const fs = require("fs");
-const path = require("path");
-const crypto = require("crypto");
+const {
+  createWorker
+} = require("tesseract.js");
+
+const sharp =
+  require("sharp");
+
+const fs =
+  require("fs");
+
+const path =
+  require("path");
+
+const crypto =
+  require("crypto");
 
 
 // ============================================================
-// ROO LOCAL OCR
-// Resolution-independent ROI OCR
+// ROOC STATS OCR
+// ============================================================
+//
+// LABEL-DRIVEN OCR
+//
+// Screenshot
+//     ↓
+// Full-page OCR
+//     ↓
+// Locate stat labels
+//     ↓
+// Locate numeric value associated with label
+//     ↓
+// Validate candidate
+//     ↓
+// Multiple preprocessing passes
+//     ↓
+// Select strongest candidate
+//     ↓
+// Merge screenshots
+//
+// IMPORTANT:
+//
+// This does NOT use fixed screenshot dimensions,
+// fixed ROIs, quartiles or screen coordinates.
+//
+// PDEF / MDEF:
+//
+//   PDEF = value from PDEF Notice
+//   MDEF = value from MDEF Notice
+//
+// Base PDEF/MDEF values are NOT used.
+//
+// Cards are NOT OCR fields.
+// sheets.js handles cards and defaults them to 2-star.
+//
+// ============================================================
+
+
+// ============================================================
+// TEMP DIRECTORY
 // ============================================================
 
 const TEMP_DIR =
@@ -27,7 +76,8 @@ if (
   fs.mkdirSync(
     TEMP_DIR,
     {
-      recursive: true
+      recursive:
+        true
     }
   );
 
@@ -35,267 +85,122 @@ if (
 
 
 // ============================================================
-// ROI HELPER
+// WORKERS
 // ============================================================
 
-function roi(
-  x,
-  y,
-  width,
-  height
-) {
+let textWorker =
+  null;
 
-  return {
+let numericWorker =
+  null;
 
-    x:
-      x,
 
-    y:
-      y,
+// ============================================================
+// TEXT OCR WORKER
+// ============================================================
 
-    width:
-      width,
+async function getTextWorker() {
 
-    height:
-      height
+  if (
+    textWorker
+  ) {
 
-  };
+    return textWorker;
+
+  }
+
+
+  console.log(
+    "[OCR] Starting text Tesseract worker..."
+  );
+
+
+  textWorker =
+    await createWorker(
+      "eng",
+      1
+    );
+
+
+  await textWorker.setParameters({
+
+    tessedit_pageseg_mode:
+      "6",
+
+    preserve_interword_spaces:
+      "1",
+
+    user_defined_dpi:
+      "300"
+
+  });
+
+
+  return textWorker;
 
 }
 
 
 // ============================================================
-// GENERAL STATS
-// Reference: 680 x 407
+// NUMERIC OCR WORKER
 // ============================================================
 
-const GENERAL_ROIS = {
+async function getNumericWorker() {
 
-  hp:
-    roi(
-      0.285,
-      0.175,
-      0.145,
-      0.085
-    ),
+  if (
+    numericWorker
+  ) {
 
-  patk:
-    roi(
-      0.285,
-      0.295,
-      0.145,
-      0.085
-    ),
+    return numericWorker;
 
-  matk:
-    roi(
-      0.285,
-      0.415,
-      0.145,
-      0.085
-    ),
-
-  pdef:
-    roi(
-      0.865,
-      0.295,
-      0.115,
-      0.085
-    ),
-
-  mdef:
-    roi(
-      0.865,
-      0.415,
-      0.115,
-      0.085
-    )
-
-};
+  }
 
 
-// ============================================================
-// QUASI STATS
-// Reference: 700 x 710
-// ============================================================
+  console.log(
+    "[OCR] Starting numeric Tesseract worker..."
+  );
 
-const QUASI_ROIS = {
 
-  critRes:
-    roi(
-      0.820,
-      0.385,
-      0.145,
-      0.070
-    ),
+  numericWorker =
+    await createWorker(
+      "eng",
+      1
+    );
 
-  pdmg:
-    roi(
-      0.260,
-      0.525,
-      0.180,
-      0.075
-    ),
 
-  mdmg:
-    roi(
-      0.260,
-      0.595,
-      0.180,
-      0.075
-    ),
+  await numericWorker.setParameters({
 
-  pdmgReduction:
-    roi(
-      0.825,
-      0.525,
-      0.160,
-      0.075
-    ),
+    tessedit_pageseg_mode:
+      "7",
 
-  mdmgReduction:
-    roi(
-      0.825,
-      0.595,
-      0.160,
-      0.075
-    ),
+    tessedit_char_whitelist:
+      "0123456789.,%-",
 
-  ignorePDEF:
-    roi(
-      0.300,
-      0.665,
-      0.175,
-      0.075
-    ),
+    preserve_interword_spaces:
+      "0",
 
-  ignoreMDEF:
-    roi(
-      0.300,
-      0.735,
-      0.175,
-      0.075
-    ),
+    user_defined_dpi:
+      "300"
 
-  pvpReduction:
-    roi(
-      0.335,
-      0.935,
-      0.175,
-      0.065
-    ),
+  });
 
-  pvpBonus:
-    roi(
-      0.835,
-      0.935,
-      0.160,
-      0.065
-    )
 
-};
+  return numericWorker;
+
+}
 
 
 // ============================================================
-// DAMAGE / EQUIPMENT
-// Reference: 665 x 591
+// DOWNLOAD DISCORD IMAGE
 // ============================================================
-
-const DAMAGE_ROIS = {
-
-  equipmentPDEF:
-    roi(
-      0.745,
-      0.000,
-      0.220,
-      0.065
-    ),
-
-  smallDamage:
-    roi(
-      0.745,
-      0.155,
-      0.220,
-      0.065
-    ),
-
-  smallReduction:
-    roi(
-      0.745,
-      0.240,
-      0.220,
-      0.065
-    ),
-
-  mediumDamage:
-    roi(
-      0.745,
-      0.325,
-      0.220,
-      0.065
-    ),
-
-  mediumReduction:
-    roi(
-      0.745,
-      0.410,
-      0.220,
-      0.065
-    ),
-
-  largeDamage:
-    roi(
-      0.745,
-      0.495,
-      0.220,
-      0.065
-    ),
-
-  largeReduction:
-    roi(
-      0.745,
-      0.580,
-      0.220,
-      0.065
-    ),
-
-  bruteDamage:
-    roi(
-      0.745,
-      0.665,
-      0.220,
-      0.065
-    ),
-
-  bruteReduction:
-    roi(
-      0.745,
-      0.750,
-      0.220,
-      0.065
-    ),
-
-  demiDamage:
-    roi(
-      0.745,
-      0.835,
-      0.220,
-      0.065
-    ),
-
-  demiReduction:
-    roi(
-      0.745,
-      0.920,
-      0.220,
-      0.065
-    )
-
-};
-
-
-// ============================================================
-// DOWNLOAD IMAGE
+//
+// Important:
+//
+// stats.js must NOT delete the Discord message until
+// extractStats() has completed this download stage.
+//
+// We also retry transient failures.
+//
 // ============================================================
 
 async function downloadImage(
@@ -308,64 +213,133 @@ async function downloadImage(
   );
 
 
-  const response =
-    await fetch(
-      url
-    );
+  let lastError =
+    null;
 
 
-  if (
-    !response.ok
+  for (
+    let attempt = 1;
+    attempt <= 3;
+    attempt++
   ) {
 
-    throw new Error(
-      "Failed to download Discord image: " +
-      response.status +
-      " " +
-      response.statusText
-    );
+    try {
+
+      console.log(
+        "[OCR] Download attempt",
+        attempt +
+          "/3"
+      );
+
+
+      const response =
+        await fetch(
+          url
+        );
+
+
+      if (
+        !response.ok
+      ) {
+
+        throw new Error(
+          "HTTP " +
+          response.status +
+          " " +
+          response.statusText
+        );
+
+      }
+
+
+      const buffer =
+        Buffer.from(
+          await response.arrayBuffer()
+        );
+
+
+      console.log(
+        "[OCR] Downloaded bytes:",
+        buffer.length
+      );
+
+
+      if (
+        buffer.length <
+        1000
+      ) {
+
+        throw new Error(
+          "Downloaded image is unexpectedly small."
+        );
+
+      }
+
+
+      const filePath =
+        path.join(
+          TEMP_DIR,
+          crypto.randomUUID() +
+          ".png"
+        );
+
+
+      await fs.promises.writeFile(
+        filePath,
+        buffer
+      );
+
+
+      return filePath;
+
+    } catch (
+      error
+    ) {
+
+      lastError =
+        error;
+
+
+      console.error(
+        "[OCR] Download attempt " +
+        attempt +
+        " failed:",
+        error.message
+      );
+
+
+      if (
+        attempt <
+        3
+      ) {
+
+        await new Promise(
+          function(resolve) {
+
+            setTimeout(
+              resolve,
+              attempt *
+              1000
+            );
+
+          }
+        );
+
+      }
+
+    }
 
   }
 
 
-  const buffer =
-    Buffer.from(
-      await response.arrayBuffer()
-    );
-
-
-  console.log(
-    "[OCR] Downloaded bytes:",
-    buffer.length
+  throw new Error(
+    "Failed to download Discord image after 3 attempts: " +
+    (
+      lastError
+        ? lastError.message
+        : "Unknown error"
+    )
   );
-
-
-  if (
-    buffer.length < 1000
-  ) {
-
-    throw new Error(
-      "Downloaded image is unexpectedly small."
-    );
-
-  }
-
-
-  const filePath =
-    path.join(
-      TEMP_DIR,
-      crypto.randomUUID() +
-      ".png"
-    );
-
-
-  await fs.promises.writeFile(
-    filePath,
-    buffer
-  );
-
-
-  return filePath;
 
 }
 
@@ -374,7 +348,7 @@ async function downloadImage(
 // IMAGE METADATA
 // ============================================================
 
-async function getImageMetadata(
+async function getMetadata(
   imagePath
 ) {
 
@@ -403,231 +377,141 @@ async function getImageMetadata(
 
 
 // ============================================================
-// CLASSIFY SCREENSHOT
+// IMAGE PREPROCESSING
+// ============================================================
+//
+// Multiple passes improve OCR reliability across:
+//
+// - Different phones
+// - Different resolutions
+// - Compression
+// - Dark/light UI
+// - Text contrast
+//
 // ============================================================
 
-async function classifyPage(
-  imagePath
-) {
-
-  const metadata =
-    await getImageMetadata(
-      imagePath
-    );
-
-
-  const width =
-    metadata.width;
-
-
-  const height =
-    metadata.height;
-
-
-  if (
-    !width ||
-    !height
-  ) {
-
-    throw new Error(
-      "Unable to determine image dimensions."
-    );
-
-  }
-
-
-  const ratio =
-    width /
-    height;
-
-
-  /*
-   * General Stats
-   *
-   * Reference:
-   * 680 / 407 = 1.67
-   */
-
-  if (
-    ratio >
-    1.40
-  ) {
-
-    return "general";
-
-  }
-
-
-  /*
-   * Damage / Equipment
-   *
-   * Reference:
-   * 665 / 591 = 1.125
-   */
-
-  if (
-    ratio >
-    1.06
-  ) {
-
-    return "damage";
-
-  }
-
-
-  /*
-   * Quasi Stats
-   *
-   * Reference:
-   * 700 / 710 = 0.986
-   */
-
-  return "quasi";
-
-}
-
-
-// ============================================================
-// CROP ROI
-// ============================================================
-
-async function cropROI(
+async function createPreprocessedImage(
   imagePath,
-  region
+  mode
 ) {
-
-  const metadata =
-    await getImageMetadata(
-      imagePath
-    );
-
-
-  const imageWidth =
-    metadata.width;
-
-
-  const imageHeight =
-    metadata.height;
-
-
-  let x =
-    Math.round(
-      imageWidth *
-      region.x
-    );
-
-
-  let y =
-    Math.round(
-      imageHeight *
-      region.y
-    );
-
-
-  let width =
-    Math.round(
-      imageWidth *
-      region.width
-    );
-
-
-  let height =
-    Math.round(
-      imageHeight *
-      region.height
-    );
-
-
-  x =
-    Math.max(
-      0,
-      x
-    );
-
-
-  y =
-    Math.max(
-      0,
-      y
-    );
-
-
-  width =
-    Math.min(
-      width,
-      imageWidth - x
-    );
-
-
-  height =
-    Math.min(
-      height,
-      imageHeight - y
-    );
-
-
-  if (
-    width <= 0 ||
-    height <= 0
-  ) {
-
-    throw new Error(
-      "Invalid OCR crop region."
-    );
-
-  }
-
 
   const outputPath =
     path.join(
       TEMP_DIR,
       crypto.randomUUID() +
-      "-roi.png"
+      "-" +
+      mode +
+      ".png"
     );
 
 
-  await sharp(
-    imagePath
-  )
-
-    .extract({
-
-      left:
-        x,
-
-      top:
-        y,
-
-      width:
-        width,
-
-      height:
-        height
-
-    })
-
-    .resize({
-
-      width:
-        1000,
-
-      withoutEnlargement:
-        false
-
-    })
-
-    .grayscale()
-
-    .normalize()
-
-    .threshold(
-      180
+  let image =
+    sharp(
+      imagePath
     )
+      .rotate()
+      .resize({
 
-    .sharpen()
+        width:
+          2200,
 
+        withoutEnlargement:
+          false
+
+      })
+      .grayscale();
+
+
+  if (
+    mode ===
+    "normal"
+  ) {
+
+    image =
+      image.normalize();
+
+  }
+
+
+  if (
+    mode ===
+    "contrast"
+  ) {
+
+    image =
+      image
+        .normalize()
+        .linear(
+          1.35,
+          -35
+        );
+
+  }
+
+
+  if (
+    mode ===
+    "highcontrast"
+  ) {
+
+    image =
+      image
+        .normalize()
+        .linear(
+          1.65,
+          -70
+        );
+
+  }
+
+
+  if (
+    mode ===
+    "threshold170"
+  ) {
+
+    image =
+      image
+        .normalize()
+        .threshold(
+          170
+        );
+
+  }
+
+
+  if (
+    mode ===
+    "threshold200"
+  ) {
+
+    image =
+      image
+        .normalize()
+        .threshold(
+          200
+        );
+
+  }
+
+
+  if (
+    mode ===
+    "threshold220"
+  ) {
+
+    image =
+      image
+        .normalize()
+        .threshold(
+          220
+        );
+
+  }
+
+
+  await image
     .png()
-
     .toFile(
       outputPath
     );
@@ -639,116 +523,10 @@ async function cropROI(
 
 
 // ============================================================
-// TESSERACT WORKER
+// NORMALIZE OCR TEXT
 // ============================================================
 
-let worker =
-  null;
-
-
-async function getWorker() {
-
-  if (
-    worker
-  ) {
-
-    return worker;
-
-  }
-
-
-  console.log(
-    "[OCR] Starting numeric Tesseract worker..."
-  );
-
-
-  worker =
-    await createWorker(
-      "eng",
-      1
-    );
-
-
-  await worker.setParameters({
-
-    tessedit_pageseg_mode:
-      "7",
-
-    tessedit_char_whitelist:
-      "0123456789.,%-",
-
-    preserve_interword_spaces:
-      "0",
-
-    user_defined_dpi:
-      "300"
-
-  });
-
-
-  return worker;
-
-}
-
-
-// ============================================================
-// READ ROI
-// ============================================================
-
-async function readROI(
-  imagePath,
-  region
-) {
-
-  const croppedPath =
-    await cropROI(
-      imagePath,
-      region
-    );
-
-
-  try {
-
-    const ocrWorker =
-      await getWorker();
-
-
-    const result =
-      await ocrWorker.recognize(
-        croppedPath
-      );
-
-
-    return (
-      result.data.text ||
-      ""
-    )
-      .trim();
-
-  } finally {
-
-    try {
-
-      await fs.promises.unlink(
-        croppedPath
-      );
-
-    } catch (error) {
-
-      // Ignore cleanup errors.
-
-    }
-
-  }
-
-}
-
-
-// ============================================================
-// NORMALIZE NUMBER
-// ============================================================
-
-function normalizeNumber(
+function normalizeOCRText(
   value
 ) {
 
@@ -757,62 +535,721 @@ function normalizeNumber(
     value === null
   ) {
 
+    return "";
+
+  }
+
+
+  return String(
+    value
+  )
+
+    .replace(
+      /\r/g,
+      ""
+    )
+
+    .replace(
+      /[“”‘’]/g,
+      ""
+    )
+
+    .replace(
+      /[|]/g,
+      "I"
+    )
+
+    .replace(
+      /_/g,
+      ""
+    );
+
+}
+
+
+// ============================================================
+// NORMALIZE LABEL
+// ============================================================
+
+function normalizeLabel(
+  value
+) {
+
+  if (
+    value === undefined ||
+    value === null
+  ) {
+
+    return "";
+
+  }
+
+
+  return String(
+    value
+  )
+    .toUpperCase()
+
+    .replace(
+      /[|]/g,
+      "I"
+    )
+
+    .replace(
+      /[^A-Z0-9]/g,
+      ""
+    );
+
+}
+
+
+// ============================================================
+// NORMALIZE SEARCH TEXT
+// ============================================================
+
+function normalizeSearchText(
+  value
+) {
+
+  return normalizeLabel(
+    value
+  );
+
+}
+
+
+// ============================================================
+// COMPACT LABEL
+// ============================================================
+
+function compactLabel(
+  value
+) {
+
+  return normalizeLabel(
+    value
+  );
+
+}
+
+
+// ============================================================
+// LEVENSHTEIN
+// ============================================================
+
+function levenshtein(
+  a,
+  b
+) {
+
+  if (
+    a === b
+  ) {
+
     return 0;
 
   }
 
 
-  let text =
-    String(
-      value
-    )
-      .trim();
+  if (
+    !a.length
+  ) {
+
+    return b.length;
+
+  }
 
 
-  text =
-    text
+  if (
+    !b.length
+  ) {
 
-      .replace(
-        /[Oo]/g,
-        "0"
-      )
+    return a.length;
 
-      .replace(
-        /[Il|]/g,
-        "1"
-      )
+  }
 
-      .replace(
-        /[Ss]/g,
-        "5"
-      )
 
-      .replace(
-        /[Bb]/g,
-        "8"
-      )
+  const matrix =
+    [];
 
-      .replace(
-        /,/g,
-        ""
-      )
 
-      .replace(
-        /%/g,
-        ""
+  for (
+    let i = 0;
+    i <= b.length;
+    i++
+  ) {
+
+    matrix[i] =
+      [i];
+
+  }
+
+
+  for (
+    let j = 0;
+    j <= a.length;
+    j++
+  ) {
+
+    matrix[0][j] =
+      j;
+
+  }
+
+
+  for (
+    let i = 1;
+    i <= b.length;
+    i++
+  ) {
+
+    for (
+      let j = 1;
+      j <= a.length;
+      j++
+    ) {
+
+      if (
+        b.charAt(
+          i - 1
+        ) ===
+        a.charAt(
+          j - 1
+        )
+      ) {
+
+        matrix[i][j] =
+          matrix[i - 1][j - 1];
+
+      } else {
+
+        matrix[i][j] =
+          Math.min(
+
+            matrix[i - 1][j] +
+              1,
+
+            matrix[i][j - 1] +
+              1,
+
+            matrix[i - 1][j - 1] +
+              1
+
+          );
+
+      }
+
+    }
+
+  }
+
+
+  return matrix[
+    b.length
+  ][
+    a.length
+  ];
+
+}
+
+
+// ============================================================
+// LABEL SIMILARITY
+// ============================================================
+
+function labelSimilarity(
+  actual,
+  expected
+) {
+
+  const a =
+    normalizeLabel(
+      actual
+    );
+
+  const e =
+    normalizeLabel(
+      expected
+    );
+
+
+  if (
+    !a ||
+    !e
+  ) {
+
+    return 0;
+
+  }
+
+
+  if (
+    a === e
+  ) {
+
+    return 1;
+
+  }
+
+
+  if (
+    a.includes(e) ||
+    e.includes(a)
+  ) {
+
+    const shorter =
+      Math.min(
+        a.length,
+        e.length
+      );
+
+    const longer =
+      Math.max(
+        a.length,
+        e.length
       );
 
 
-  text =
-    text.replace(
-      /[^0-9.-]/g,
-      ""
+    return (
+      shorter /
+      longer
     );
+
+  }
+
+
+  const distance =
+    levenshtein(
+      a,
+      e
+    );
+
+
+  const maxLength =
+    Math.max(
+      a.length,
+      e.length
+    );
+
+
+  return (
+    1 -
+    distance /
+    maxLength
+  );
+
+}
+
+
+// ============================================================
+// LABEL ALIASES
+// ============================================================
+
+const LABEL_ALIASES = {
+
+  hp: [
+
+    "HP"
+
+  ],
+
+
+  patk: [
+
+    "PATK",
+
+    "P ATK"
+
+  ],
+
+
+  matk: [
+
+    "MATK",
+
+    "M ATK"
+
+  ],
+
+
+  pvpBonus: [
+
+    "PVP DMG BONUS",
+
+    "PVP DMG BON",
+
+    "P DMG BONUS"
+
+  ],
+
+
+  pvpReduction: [
+
+    "PVP DMG REDUCTION",
+
+    "PVP DMG RED",
+
+    "P DMG REDUCTION"
+
+  ],
+
+
+  pdmg: [
+
+    "PDMG",
+
+    "PDMG %"
+
+  ],
+
+
+  mdmg: [
+
+    "MDMG",
+
+    "MDMG %"
+
+  ],
+
+
+  pdmgReduction: [
+
+    "PDMG REDUCTION",
+
+    "PDMG REDUCTION %",
+
+    "PDMG-R",
+
+    "PDMG-R %",
+
+    "PDMG.R",
+
+    "PDMG R"
+
+  ],
+
+
+  mdmgReduction: [
+
+    "MDMG REDUCTION",
+
+    "MDMG REDUCTION %",
+
+    "MDMG-R",
+
+    "MDMG-R %",
+
+    "MDMG.R",
+
+    "MDMG R"
+
+  ],
+
+
+  critRes: [
+
+    "CRIT RES",
+
+    "CRIT RESISTANCE"
+
+  ],
+
+
+  ignorePDEF: [
+
+    "IGNORE PDEF"
+
+  ],
+
+
+  ignoreMDEF: [
+
+    "IGNORE MDEF"
+
+  ],
+
+
+  equipmentPDEF: [
+
+    "EQUIPMENT PDEF",
+
+    "EQUIPMENT PDEF %"
+
+  ],
+
+
+  equipmentMDEF: [
+
+    "EQUIPMENT MDEF",
+
+    "EQUIPMENT MDEF %"
+
+  ],
+
+
+  smallDamage: [
+
+    "DMG VS SMALL ENEMIES",
+
+    "DMG VS SMALL"
+
+  ],
+
+
+  smallReduction: [
+
+    "DMG REDUCTION VS SMALL ENEMIES",
+
+    "DMG REDUCTION VS SMALL"
+
+  ],
+
+
+  mediumDamage: [
+
+    "DMG VS MEDIUM ENEMIES",
+
+    "DMG VS MEDIUM"
+
+  ],
+
+
+  mediumReduction: [
+
+    "DMG REDUCTION VS MEDIUM ENEMIES",
+
+    "DMG REDUCTION VS MEDIUM"
+
+  ],
+
+
+  largeDamage: [
+
+    "DMG VS LARGE ENEMIES",
+
+    "DMG VS LARGE MONSTERS",
+
+    "DMG VS LARGE"
+
+  ],
+
+
+  largeReduction: [
+
+    "DMG REDUCTION VS LARGE ENEMIES",
+
+    "DMG REDUCTION VS LARGE MONSTERS",
+
+    "DMG REDUCTION VS LARGE"
+
+  ],
+
+
+  bruteDamage: [
+
+    "DMG VS BRUTE"
+
+  ],
+
+
+  bruteReduction: [
+
+    "DMG REDUCTION VS BRUTE"
+
+  ],
+
+
+  demiDamage: [
+
+    "DMG VS DEMI-HUMAN",
+
+    "DMG VS DEMIHUMAN"
+
+  ],
+
+
+  demiReduction: [
+
+    "DMG REDUCTION VS DEMI-HUMAN",
+
+    "DMG REDUCTION VS DEMIHUMAN"
+
+  ]
+
+};
+
+
+// ============================================================
+// LIMITS
+// ============================================================
+
+const LIMITS = {
+
+  hp: [
+    1,
+    10000000
+  ],
+
+  patk: [
+    1,
+    1000000
+  ],
+
+  matk: [
+    1,
+    1000000
+  ],
+
+  pdef: [
+    0,
+    1000000
+  ],
+
+  mdef: [
+    0,
+    1000000
+  ],
+
+  pvpBonus: [
+    0,
+    1000000
+  ],
+
+  pvpReduction: [
+    0,
+    1000000
+  ],
+
+  pdmg: [
+    0,
+    1000
+  ],
+
+  mdmg: [
+    0,
+    1000
+  ],
+
+  pdmgReduction: [
+    0,
+    1000
+  ],
+
+  mdmgReduction: [
+    0,
+    1000
+  ],
+
+  critRes: [
+    0,
+    1000
+  ],
+
+  ignorePDEF: [
+    0,
+    1000000
+  ],
+
+  ignoreMDEF: [
+    0,
+    1000000
+  ],
+
+  equipmentPDEF: [
+    0,
+    100
+  ],
+
+  equipmentMDEF: [
+    0,
+    100
+  ],
+
+  smallDamage: [
+    0,
+    1000
+  ],
+
+  smallReduction: [
+    0,
+    1000
+  ],
+
+  mediumDamage: [
+    0,
+    1000
+  ],
+
+  mediumReduction: [
+    0,
+    1000
+  ],
+
+  largeDamage: [
+    0,
+    1000
+  ],
+
+  largeReduction: [
+    0,
+    1000
+  ],
+
+  bruteDamage: [
+    0,
+    1000
+  ],
+
+  bruteReduction: [
+    0,
+    1000
+  ],
+
+  demiDamage: [
+    0,
+    1000
+  ],
+
+  demiReduction: [
+    0,
+    1000
+  ],
+
+  pdefNotice: [
+    0,
+    1000000
+  ],
+
+  mdefNotice: [
+    0,
+    1000000
+  ]
+
+};
+
+
+// ============================================================
+// VALIDATE VALUE
+// ============================================================
+
+function validateValue(
+  key,
+  value
+) {
+
+  if (
+    value === null ||
+    value === undefined
+  ) {
+
+    return null;
+
+  }
 
 
   const number =
     Number(
-      text
+      value
     );
 
 
@@ -822,7 +1259,32 @@ function normalizeNumber(
     )
   ) {
 
-    return 0;
+    return null;
+
+  }
+
+
+  const limits =
+    LIMITS[key];
+
+
+  if (
+    !limits
+  ) {
+
+    return number;
+
+  }
+
+
+  if (
+    number <
+      limits[0] ||
+    number >
+      limits[1]
+  ) {
+
+    return null;
 
   }
 
@@ -833,155 +1295,660 @@ function normalizeNumber(
 
 
 // ============================================================
-// READ ALL ROIS
+// REPAIR OCR NUMERIC TEXT
 // ============================================================
 
-async function readPageROIs(
-  imagePath,
-  pageType,
-  roiMap
+function repairNumericText(
+  value
 ) {
 
-  const result = {};
+  return String(
+    value ||
+    ""
+  )
 
+    .replace(
+      /O/g,
+      "0"
+    )
 
-  const keys =
-    Object.keys(
-      roiMap
+    .replace(
+      /o/g,
+      "0"
+    )
+
+    .replace(
+      /I/g,
+      "1"
+    )
+
+    .replace(
+      /l/g,
+      "1"
+    )
+
+    .replace(
+      /S/g,
+      "5"
+    )
+
+    .replace(
+      /s/g,
+      "5"
+    )
+
+    .replace(
+      /B/g,
+      "8"
+    )
+
+    .replace(
+      /b/g,
+      "8"
+    )
+
+    .replace(
+      /\s/g,
+      ""
     );
-
-
-  for (
-    let i = 0;
-    i < keys.length;
-    i++
-  ) {
-
-    const key =
-      keys[i];
-
-
-    console.log(
-      "[OCR] Reading " +
-      pageType +
-      "." +
-      key
-    );
-
-
-    const raw =
-      await readROI(
-        imagePath,
-        roiMap[key]
-      );
-
-
-    const value =
-      normalizeNumber(
-        raw
-      );
-
-
-    console.log(
-      "[OCR] " +
-      pageType +
-      "." +
-      key +
-      " = " +
-      value +
-      " (raw: " +
-      JSON.stringify(
-        raw
-      ) +
-      ")"
-    );
-
-
-    result[key] =
-      value;
-
-  }
-
-
-  return result;
 
 }
 
 
 // ============================================================
-// PARSE SCREENSHOT
+// EXTRACT NUMBERS
 // ============================================================
 
-async function parseScreenshot(
-  imagePath
+function extractNumbers(
+  text
 ) {
 
-  const pageType =
-    await classifyPage(
-      imagePath
-    );
-
-
-  console.log(
-    "[OCR] Page classified as:",
-    pageType
-  );
-
-
   if (
-    pageType ===
-    "general"
+    !text
   ) {
 
-    return {
-
-      type:
-        "general",
-
-      values:
-        await readPageROIs(
-          imagePath,
-          "general",
-          GENERAL_ROIS
-        )
-
-    };
+    return [];
 
   }
 
 
+  const matches =
+    String(
+      text
+    ).match(
+      /-?\d[\d,]*(?:\.\d+)?\s*%?/g
+    );
+
+
   if (
-    pageType ===
-    "damage"
+    !matches
   ) {
 
-    return {
+    return [];
 
-      type:
-        "damage",
+  }
 
-      values:
-        await readPageROIs(
-          imagePath,
-          "damage",
-          DAMAGE_ROIS
-        )
 
-    };
+  return matches
+    .map(
+      function(raw) {
+
+        const percent =
+          raw
+            .trim()
+            .endsWith(
+              "%"
+            );
+
+
+        let cleaned =
+          raw
+            .replace(
+              /,/g,
+              ""
+            )
+            .replace(
+              /%/g,
+              ""
+            )
+            .trim();
+
+
+        cleaned =
+          repairNumericText(
+            cleaned
+          );
+
+
+        const value =
+          Number(
+            cleaned
+          );
+
+
+        if (
+          !Number.isFinite(
+            value
+          )
+        ) {
+
+          return null;
+
+        }
+
+
+        return {
+
+          value,
+
+          percent,
+
+          raw
+
+        };
+
+      }
+    )
+    .filter(
+      Boolean
+    );
+
+}
+
+
+// ============================================================
+// EXTRACT LAST VALID NUMBER
+// ============================================================
+
+function extractLastNumber(
+  line,
+  key
+) {
+
+  const numbers =
+    extractNumbers(
+      line
+    );
+
+
+  for (
+    let i =
+      numbers.length - 1;
+    i >= 0;
+    i--
+  ) {
+
+    const valid =
+      validateValue(
+        key,
+        numbers[i].value
+      );
+
+
+    if (
+      valid !== null
+    ) {
+
+      return {
+
+        value:
+          valid,
+
+        raw:
+          numbers[i].raw,
+
+        percent:
+          numbers[i].percent
+
+      };
+
+    }
+
+  }
+
+
+  return null;
+
+}
+
+
+// ============================================================
+// FIND BEST LABEL ALIAS
+// ============================================================
+
+function findBestAlias(
+  line,
+  aliases
+) {
+
+  let best = {
+
+    similarity:
+      0,
+
+    alias:
+      null
+
+  };
+
+
+  for (
+    const alias of aliases
+  ) {
+
+    const similarity =
+      labelSimilarity(
+        line,
+        alias
+      );
+
+
+    if (
+      similarity >
+      best.similarity
+    ) {
+
+      best = {
+
+        similarity,
+
+        alias
+
+      };
+
+    }
+
+  }
+
+
+  return best;
+
+}
+
+
+// ============================================================
+// FIND VALUE AFTER LABEL
+// ============================================================
+
+function findValueAfterLabel(
+  line,
+  alias,
+  key
+) {
+
+  const escaped =
+    alias
+      .trim()
+      .split(
+        /\s+/
+      )
+      .map(
+        function(part) {
+
+          return part.replace(
+            /[.*+?^${}()|[\]\\]/g,
+            "\\$&"
+          );
+
+        }
+      )
+      .join(
+        "\\s*"
+      );
+
+
+  const regex =
+    new RegExp(
+
+      escaped +
+
+      "[\\s:._-]*" +
+
+      "(-?\\d[\\d,]*(?:\\.\\d+)?%?)",
+
+      "i"
+
+    );
+
+
+  const match =
+    String(
+      line
+    ).match(
+      regex
+    );
+
+
+  if (
+    !match
+  ) {
+
+    return null;
+
+  }
+
+
+  let cleaned =
+    match[1]
+      .replace(
+        /,/g,
+        ""
+      )
+      .replace(
+        /%/g,
+        ""
+      );
+
+
+  cleaned =
+    repairNumericText(
+      cleaned
+    );
+
+
+  const number =
+    Number(
+      cleaned
+    );
+
+
+  const valid =
+    validateValue(
+      key,
+      number
+    );
+
+
+  if (
+    valid === null
+  ) {
+
+    return null;
 
   }
 
 
   return {
 
-    type:
-      "quasi",
+    value:
+      valid,
 
-    values:
-      await readPageROIs(
-        imagePath,
-        "quasi",
-        QUASI_ROIS
+    raw:
+      match[1],
+
+    percent:
+      match[1]
+        .endsWith(
+          "%"
+        )
+
+  };
+
+}
+
+
+// ============================================================
+// READ LABEL / VALUE
+// ============================================================
+
+function readLabelValue(
+  lines,
+  key
+) {
+
+  const aliases =
+    LABEL_ALIASES[key];
+
+
+  if (
+    !aliases
+  ) {
+
+    return {
+
+      value:
+        null,
+
+      labelFound:
+        false,
+
+      raw:
+        ""
+
+    };
+
+  }
+
+
+  let bestMatch =
+    null;
+
+
+  for (
+    let i = 0;
+    i < lines.length;
+    i++
+  ) {
+
+    const line =
+      lines[i];
+
+
+    const match =
+      findBestAlias(
+        line,
+        aliases
+      );
+
+
+    if (
+      match.similarity <
+      0.65
+    ) {
+
+      continue;
+
+    }
+
+
+    let value =
+      findValueAfterLabel(
+        line,
+        match.alias,
+        key
+      );
+
+
+    /*
+     * If the value is on the next line,
+     * try that as a fallback.
+     */
+
+    if (
+      !value &&
+      lines[i + 1]
+    ) {
+
+      value =
+        extractLastNumber(
+          lines[i + 1],
+          key
+        );
+
+    }
+
+
+    if (
+      value
+    ) {
+
+      const score =
+        (
+          match.similarity *
+          100
+        ) +
+        (
+          value.percent
+            ? 5
+            : 0
+        );
+
+
+      if (
+        !bestMatch ||
+        score >
+          bestMatch.score
+      ) {
+
+        bestMatch = {
+
+          value:
+            value.value,
+
+          raw:
+            value.raw,
+
+          percent:
+            value.percent,
+
+          alias:
+            match.alias,
+
+          similarity:
+            match.similarity,
+
+          score,
+
+          line
+
+        };
+
+      }
+
+    }
+
+  }
+
+
+  if (
+    !bestMatch
+  ) {
+
+    return {
+
+      value:
+        null,
+
+      labelFound:
+        false,
+
+      raw:
+        ""
+
+    };
+
+  }
+
+
+  console.log(
+    "[OCR] Label:",
+    key,
+    "| matched:",
+    bestMatch.alias,
+    "| value:",
+    bestMatch.value,
+    "| line:",
+    JSON.stringify(
+      bestMatch.line
+    )
+  );
+
+
+  return {
+
+    value:
+      bestMatch.value,
+
+    percent:
+      bestMatch.percent,
+
+    labelFound:
+      true,
+
+    raw:
+      bestMatch.raw,
+
+    similarity:
+      bestMatch.similarity,
+
+    score:
+      bestMatch.score,
+
+    line:
+      bestMatch.line
+
+  };
+
+}
+
+
+// ============================================================
+// PAGE CLASSIFICATION
+// ============================================================
+//
+// Classification is ONLY used to determine which special
+// PDEF/MDEF Notice parser to use.
+//
+// It is NOT used to determine screenshot coordinates.
+//
+// ============================================================
+
+function classifyPage(
+  text
+) {
+
+  const normalized =
+    normalizeSearchText(
+      text
+    );
+
+
+  const compact =
+    compactLabel(
+      normalized
+    );
+
+
+  return {
+
+    hasPDEFNotice:
+      compact.includes(
+        "PDEFNOTICE"
+      ),
+
+    hasMDEFNotice:
+      compact.includes(
+        "MDEFNOTICE"
+      ),
+
+    hasEquipmentPDEF:
+      compact.includes(
+        "EQUIPMENTPDEF"
+      ),
+
+    hasEquipmentMDEF:
+      compact.includes(
+        "EQUIPMENTMDEF"
+      ),
+
+    hasIgnorePDEF:
+      compact.includes(
+        "IGNOREPDEF"
+      ),
+
+    hasIgnoreMDEF:
+      compact.includes(
+        "IGNOREMDEF"
       )
 
   };
@@ -990,234 +1957,1278 @@ async function parseScreenshot(
 
 
 // ============================================================
-// MERGE RESULTS
+// EXTRACT LABEL CANDIDATES
 // ============================================================
 
-function mergeResults(
-  pages
+function extractFieldsFromText(
+  text,
+  screenshotIndex,
+  mode,
+  confidence
 ) {
 
-  const stats = {
+  const candidates =
+    {};
+
+
+  Object.keys(
+    LABEL_ALIASES
+  ).forEach(
+    function(key) {
+
+      candidates[key] =
+        [];
+
+    }
+  );
+
+
+  candidates.pdefNotice =
+    [];
+
+  candidates.mdefNotice =
+    [];
+
+
+  const lines =
+    normalizeOCRText(
+      text
+    )
+      .split(
+        "\n"
+      )
+      .map(
+        function(line) {
+
+          return line.trim();
+
+        }
+      )
+      .filter(
+        function(line) {
+
+          return (
+            line.length >
+            0
+          );
+
+        }
+      );
+
+
+  const page =
+    classifyPage(
+      text
+    );
+
+
+  console.log(
+    "[OCR] PAGE CLASS:",
+    screenshotIndex + 1,
+    mode,
+    page
+  );
+
+
+  // ==========================================================
+  // STANDARD LABEL FIELDS
+  // ==========================================================
+
+  const fields = [
+
+    "hp",
+    "patk",
+    "matk",
+
+    "pvpBonus",
+    "pvpReduction",
+
+    "pdmg",
+    "mdmg",
+
+    "pdmgReduction",
+    "mdmgReduction",
+
+    "critRes",
+
+    "ignorePDEF",
+    "ignoreMDEF",
+
+    "equipmentPDEF",
+    "equipmentMDEF",
+
+    "smallDamage",
+    "smallReduction",
+
+    "mediumDamage",
+    "mediumReduction",
+
+    "largeDamage",
+    "largeReduction",
+
+    "bruteDamage",
+    "bruteReduction",
+
+    "demiDamage",
+    "demiReduction"
+
+  ];
+
+
+  for (
+    const line of lines
+  ) {
+
+    for (
+      const key of fields
+    ) {
+
+      /*
+       * PDEF/MDEF are deliberately NOT in this list.
+       *
+       * They can only come from their corresponding Notice.
+       */
+
+      const aliases =
+        LABEL_ALIASES[key];
+
+
+      const aliasMatch =
+        findBestAlias(
+          line,
+          aliases
+        );
+
+
+      if (
+        aliasMatch.similarity <
+        0.65
+      ) {
+
+        continue;
+
+      }
+
+
+      /*
+       * PvP Bonus special protection.
+       *
+       * We do not want:
+       *
+       * PDMG Bonus 360
+       *
+       * to become PvP Bonus.
+       */
+
+      if (
+        key ===
+        "pvpBonus"
+      ) {
+
+        const explicitPvP =
+          /PVP\s+DMG\s+BON(?:US)?/i
+            .test(
+              line
+            ) ||
+
+          /P\s+DMG\s+BON(?:US)?/i
+            .test(
+              line
+            );
+
+
+        if (
+          !explicitPvP
+        ) {
+
+          continue;
+
+        }
+
+      }
+
+
+      const value =
+        findValueAfterLabel(
+          line,
+          aliasMatch.alias,
+          key
+        );
+
+
+      if (
+        !value
+      ) {
+
+        continue;
+
+      }
+
+
+      let score =
+        (
+          aliasMatch.similarity *
+          100
+        ) +
+
+        (
+          confidence *
+          0.30
+        );
+
+
+      /*
+       * Exact label matches are preferred.
+       */
+
+      if (
+        normalizeLabel(
+          line
+        ).includes(
+          normalizeLabel(
+            aliasMatch.alias
+          )
+        )
+      ) {
+
+        score +=
+          20;
+
+      }
+
+
+      /*
+       * Percentage fields should preferably
+       * have an OCR-detected % sign.
+       */
+
+      const percentageField =
+        [
+
+          "pdmg",
+          "mdmg",
+
+          "pdmgReduction",
+          "mdmgReduction",
+
+          "equipmentPDEF",
+          "equipmentMDEF",
+
+          "smallDamage",
+          "smallReduction",
+
+          "mediumDamage",
+          "mediumReduction",
+
+          "largeDamage",
+          "largeReduction",
+
+          "bruteDamage",
+          "bruteReduction",
+
+          "demiDamage",
+          "demiReduction"
+
+        ].includes(
+          key
+        );
+
+
+      if (
+        percentageField &&
+        value.percent
+      ) {
+
+        score +=
+          10;
+
+      }
+
+
+      candidates[key].push({
+
+        value:
+          value.value,
+
+        raw:
+          value.raw,
+
+        line,
+
+        alias:
+          aliasMatch.alias,
+
+        similarity:
+          aliasMatch.similarity,
+
+        confidence,
+
+        score,
+
+        screenshotIndex,
+
+        mode
+
+      });
+
+    }
+
+  }
+
+
+  // ==========================================================
+  // PDEF NOTICE
+  // ==========================================================
+
+  if (
+    page.hasPDEFNotice
+  ) {
+
+    for (
+      let i = 0;
+      i < lines.length;
+      i++
+    ) {
+
+      const line =
+        lines[i];
+
+
+      /*
+       * Ignore Base PDEF.
+       */
+
+      if (
+        /BASE\s+PDEF/i.test(
+          line
+        )
+      ) {
+
+        continue;
+
+      }
+
+
+      /*
+       * Ignore Equipment PDEF itself.
+       *
+       * The Notice value is what we want.
+       */
+
+      if (
+        /EQUIPMENT\s+PDEF/i.test(
+          line
+        )
+      ) {
+
+        continue;
+
+      }
+
+
+      if (
+        /PDEF\s+NOTICE/i.test(
+          line
+        )
+      ) {
+
+        let value =
+          extractLastNumber(
+            line,
+            "pdefNotice"
+          );
+
+
+        /*
+         * Sometimes the number appears
+         * on the next OCR line.
+         */
+
+        if (
+          !value &&
+          lines[i + 1]
+        ) {
+
+          value =
+            extractLastNumber(
+              lines[i + 1],
+              "pdefNotice"
+            );
+
+        }
+
+
+        if (
+          value
+        ) {
+
+          candidates.pdefNotice.push({
+
+            value:
+              value.value,
+
+            raw:
+              value.raw,
+
+            line:
+              line,
+
+            alias:
+              "PDEF NOTICE",
+
+            similarity:
+              1,
+
+            confidence,
+
+            score:
+              150 +
+              confidence * 0.3,
+
+            screenshotIndex,
+
+            mode
+
+          });
+
+        }
+
+      }
+
+    }
+
+  }
+
+
+  // ==========================================================
+  // MDEF NOTICE
+  // ==========================================================
+
+  if (
+    page.hasMDEFNotice
+  ) {
+
+    for (
+      let i = 0;
+      i < lines.length;
+      i++
+    ) {
+
+      const line =
+        lines[i];
+
+
+      /*
+       * Ignore Base MDEF.
+       */
+
+      if (
+        /BASE\s+MDEF/i.test(
+          line
+        )
+      ) {
+
+        continue;
+
+      }
+
+
+      /*
+       * Ignore Equipment MDEF itself.
+       */
+
+      if (
+        /EQUIPMENT\s+MDEF/i.test(
+          line
+        )
+      ) {
+
+        continue;
+
+      }
+
+
+      if (
+        /MDEF\s+NOTICE/i.test(
+          line
+        )
+      ) {
+
+        let value =
+          extractLastNumber(
+            line,
+            "mdefNotice"
+          );
+
+
+        if (
+          !value &&
+          lines[i + 1]
+        ) {
+
+          value =
+            extractLastNumber(
+              lines[i + 1],
+              "mdefNotice"
+            );
+
+        }
+
+
+        if (
+          value
+        ) {
+
+          candidates.mdefNotice.push({
+
+            value:
+              value.value,
+
+            raw:
+              value.raw,
+
+            line:
+              line,
+
+            alias:
+              "MDEF NOTICE",
+
+            similarity:
+              1,
+
+            confidence,
+
+            score:
+              150 +
+              confidence * 0.3,
+
+            screenshotIndex,
+
+            mode
+
+          });
+
+        }
+
+      }
+
+    }
+
+  }
+
+
+  return candidates;
+
+}
+
+
+// ============================================================
+// RUN OCR
+// ============================================================
+
+async function runOCR(
+  imagePath
+) {
+
+  const worker =
+    await getTextWorker();
+
+
+  const result =
+    await worker.recognize(
+      imagePath
+    );
+
+
+  return {
+
+    text:
+      result.data.text ||
+      "",
+
+    confidence:
+      Number(
+        result.data.confidence
+      ) || 0,
+
+    words:
+      result.data.words ||
+      []
+
+  };
+
+}
+
+
+// ============================================================
+// PROCESS SCREENSHOT
+// ============================================================
+
+async function processScreenshot(
+  imagePath,
+  screenshotIndex
+) {
+
+  console.log(
+    "========================================"
+  );
+
+  console.log(
+    "[OCR] Processing screenshot:",
+    screenshotIndex + 1
+  );
+
+  console.log(
+    "========================================"
+  );
+
+
+  const candidates =
+    {};
+
+
+  Object.keys(
+    LABEL_ALIASES
+  ).forEach(
+    function(key) {
+
+      candidates[key] =
+        [];
+
+    }
+  );
+
+
+  candidates.pdefNotice =
+    [];
+
+  candidates.mdefNotice =
+    [];
+
+
+  const modes = [
+
+    "normal",
+
+    "contrast",
+
+    "highcontrast",
+
+    "threshold170",
+
+    "threshold200",
+
+    "threshold220"
+
+  ];
+
+
+  for (
+    const mode of modes
+  ) {
+
+    let preprocessedPath =
+      null;
+
+
+    try {
+
+      console.log(
+        "[OCR] Pass:",
+        mode,
+        "| screenshot:",
+        screenshotIndex + 1
+      );
+
+
+      preprocessedPath =
+        await createPreprocessedImage(
+          imagePath,
+          mode
+        );
+
+
+      const result =
+        await runOCR(
+          preprocessedPath
+        );
+
+
+      console.log(
+        "[OCR DEBUG] MODE:",
+        mode,
+        "| SCREENSHOT:",
+        screenshotIndex + 1
+      );
+
+
+      console.log(
+        "[OCR DEBUG] CONFIDENCE:",
+        result.confidence
+      );
+
+
+      console.log(
+        "[OCR DEBUG] TEXT LENGTH:",
+        result.text.length
+      );
+
+
+      console.log(
+        "[OCR DEBUG] WORD COUNT:",
+        result.words.length
+      );
+
+
+      console.log(
+        "[OCR DEBUG] RAW TEXT:"
+      );
+
+
+      console.log(
+        result.text
+      );
+
+
+      const parsed =
+        extractFieldsFromText(
+          result.text,
+          screenshotIndex,
+          mode,
+          result.confidence
+        );
+
+
+      Object.keys(
+        parsed
+      ).forEach(
+        function(key) {
+
+          if (
+            !candidates[key]
+          ) {
+
+            candidates[key] =
+              [];
+
+          }
+
+
+          candidates[key].push(
+            ...parsed[key]
+          );
+
+        }
+      );
+
+
+    } catch (
+      error
+    ) {
+
+      console.error(
+        "[OCR] Pass failed:",
+        mode,
+        "| screenshot:",
+        screenshotIndex + 1,
+        "|",
+        error.message
+      );
+
+    } finally {
+
+      if (
+        preprocessedPath
+      ) {
+
+        try {
+
+          await fs.promises.unlink(
+            preprocessedPath
+          );
+
+        } catch (
+          error
+        ) {
+
+          // Ignore cleanup errors.
+
+        }
+
+      }
+
+    }
+
+  }
+
+
+  return candidates;
+
+}
+
+
+// ============================================================
+// SELECT BEST CANDIDATE
+// ============================================================
+
+function selectBestCandidate(
+  candidates
+) {
+
+  if (
+    !Array.isArray(
+      candidates
+    ) ||
+    candidates.length ===
+      0
+  ) {
+
+    return null;
+
+  }
+
+
+  return [
+    ...candidates
+  ]
+    .sort(
+      function(a, b) {
+
+        return (
+          b.score -
+          a.score
+        );
+
+      }
+    )[0];
+
+}
+
+
+// ============================================================
+// EMPTY RESULT
+// ============================================================
+
+function emptyResult() {
+
+  return {
 
     name:
       "",
 
+    hp:
+      null,
+
     patk:
-      0,
+      null,
 
     matk:
-      0,
-
-    hp:
-      0,
+      null,
 
     pdef:
-      0,
+      null,
 
     mdef:
-      0,
+      null,
 
     pvpBonus:
-      0,
+      null,
 
     pvpReduction:
-      0,
+      null,
 
     pdmg:
-      0,
+      null,
 
     mdmg:
-      0,
+      null,
 
     pdmgReduction:
-      0,
+      null,
 
     mdmgReduction:
-      0,
+      null,
 
     critRes:
-      0,
+      null,
 
     ignorePDEF:
-      0,
+      null,
 
     ignoreMDEF:
-      0,
+      null,
 
     equipmentPDEF:
-      0,
+      null,
 
     equipmentMDEF:
-      0,
+      null,
 
     smallDamage:
-      0,
+      null,
 
     smallReduction:
-      0,
+      null,
 
     mediumDamage:
-      0,
+      null,
 
     mediumReduction:
-      0,
+      null,
 
     largeDamage:
-      0,
+      null,
 
     largeReduction:
-      0,
+      null,
 
     bruteDamage:
-      0,
+      null,
 
     bruteReduction:
-      0,
+      null,
 
     demiDamage:
-      0,
+      null,
 
     demiReduction:
-      0,
+      null,
 
     warnings:
       []
 
   };
 
-
-  pages.forEach(
-    function(page) {
-
-      if (
-        page &&
-        page.values
-      ) {
-
-        Object.assign(
-          stats,
-          page.values
-        );
-
-      }
-
-    }
-  );
+}
 
 
-  const required = [
+// ============================================================
+// REQUIRED FIELDS
+// ============================================================
+//
+// Cards intentionally excluded.
+//
+// ============================================================
 
-    [
-      "HP",
-      stats.hp
-    ],
+const REQUIRED_FIELDS = [
 
-    [
-      "PATK",
-      stats.patk
-    ],
+  [
+    "HP",
+    "hp"
+  ],
 
-    [
-      "MATK",
-      stats.matk
-    ],
+  [
+    "PATK",
+    "patk"
+  ],
 
-    [
-      "PDEF",
-      stats.pdef
-    ],
+  [
+    "MATK",
+    "matk"
+  ],
 
-    [
-      "MDEF",
-      stats.mdef
-    ],
+  [
+    "PDEF",
+    "pdef"
+  ],
 
-    [
-      "PDMG",
-      stats.pdmg
-    ],
+  [
+    "MDEF",
+    "mdef"
+  ],
 
-    [
-      "MDMG",
-      stats.mdmg
-    ],
+  [
+    "PvP DMG Bonus",
+    "pvpBonus"
+  ],
 
-    [
-      "PDMG Reduction",
-      stats.pdmgReduction
-    ],
+  [
+    "PvP DMG Reduction",
+    "pvpReduction"
+  ],
 
-    [
-      "MDMG Reduction",
-      stats.mdmgReduction
-    ],
+  [
+    "PDMG",
+    "pdmg"
+  ],
 
-    [
-      "Ignore PDEF",
-      stats.ignorePDEF
-    ],
+  [
+    "MDMG",
+    "mdmg"
+  ],
 
-    [
-      "Ignore MDEF",
-      stats.ignoreMDEF
-    ],
+  [
+    "PDMG Reduction",
+    "pdmgReduction"
+  ],
 
-    [
-      "Equipment PDEF",
-      stats.equipmentPDEF
-    ],
+  [
+    "MDMG Reduction",
+    "mdmgReduction"
+  ],
 
-    [
-      "Equipment MDEF",
-      stats.equipmentMDEF
-    ],
+  [
+    "Crit RES",
+    "critRes"
+  ],
 
-    [
-      "Medium Damage",
-      stats.mediumDamage
-    ],
+  [
+    "Ignore PDEF",
+    "ignorePDEF"
+  ],
 
-    [
-      "Medium Reduction",
-      stats.mediumReduction
-    ],
+  [
+    "Ignore MDEF",
+    "ignoreMDEF"
+  ],
 
-    [
-      "Demi-Human Damage",
-      stats.demiDamage
-    ],
+  [
+    "Equipment PDEF %",
+    "equipmentPDEF"
+  ],
 
-    [
-      "Demi-Human Reduction",
-      stats.demiReduction
-    ]
+  [
+    "Equipment MDEF %",
+    "equipmentMDEF"
+  ],
+
+  [
+    "Medium Damage",
+    "mediumDamage"
+  ],
+
+  [
+    "Medium Reduction",
+    "mediumReduction"
+  ],
+
+  [
+    "Demi-Human Damage",
+    "demiDamage"
+  ],
+
+  [
+    "Demi-Human Reduction",
+    "demiReduction"
+  ]
+
+];
+
+
+// ============================================================
+// MERGE RESULTS
+// ============================================================
+
+function mergeResults(
+  candidates
+) {
+
+  const stats =
+    emptyResult();
+
+
+  // ==========================================================
+  // STANDARD FIELDS
+  // ==========================================================
+
+  const standardFields = [
+
+    "hp",
+    "patk",
+    "matk",
+
+    "pvpBonus",
+    "pvpReduction",
+
+    "pdmg",
+    "mdmg",
+
+    "pdmgReduction",
+    "mdmgReduction",
+
+    "critRes",
+
+    "ignorePDEF",
+    "ignoreMDEF",
+
+    "equipmentPDEF",
+    "equipmentMDEF",
+
+    "smallDamage",
+    "smallReduction",
+
+    "mediumDamage",
+    "mediumReduction",
+
+    "largeDamage",
+    "largeReduction",
+
+    "bruteDamage",
+    "bruteReduction",
+
+    "demiDamage",
+    "demiReduction"
 
   ];
 
 
-  required.forEach(
-    function(item) {
+  for (
+    const key of standardFields
+  ) {
 
-      const name =
-        item[0];
+    const best =
+      selectBestCandidate(
+        candidates[key]
+      );
 
-      const value =
-        item[1];
+
+    if (
+      best
+    ) {
+
+      stats[key] =
+        best.value;
 
 
-      /*
-       * 0 is a legitimate OCR value.
-       *
-       * Do not treat it as missing.
-       */
+      console.log(
+        "[OCR] SELECTED:",
+        key,
+        "=",
+        best.value,
+        "| screenshot:",
+        best.screenshotIndex +
+          1,
+        "| pass:",
+        best.mode,
+        "| raw:",
+        JSON.stringify(
+          best.raw
+        )
+      );
+
+    } else {
+
+      console.log(
+        "[OCR] NO CANDIDATE:",
+        key
+      );
+
+    }
+
+  }
+
+
+  // ==========================================================
+  // PDEF
+  // ==========================================================
+  //
+  // ONLY from PDEF Notice.
+  //
+  // Never Equipment PDEF.
+  //
+  // ==========================================================
+
+  const bestPDEF =
+    selectBestCandidate(
+      candidates.pdefNotice
+    );
+
+
+  if (
+    bestPDEF
+  ) {
+
+    stats.pdef =
+      bestPDEF.value;
+
+
+    console.log(
+      "[OCR] PDEF FROM NOTICE:",
+      stats.pdef,
+      "| screenshot:",
+      bestPDEF.screenshotIndex +
+        1,
+      "| pass:",
+      bestPDEF.mode,
+      "| raw:",
+      JSON.stringify(
+        bestPDEF.raw
+      )
+    );
+
+  } else {
+
+    console.log(
+      "[OCR] PDEF NOTICE NOT FOUND"
+    );
+
+  }
+
+
+  // ==========================================================
+  // MDEF
+  // ==========================================================
+
+  const bestMDEF =
+    selectBestCandidate(
+      candidates.mdefNotice
+    );
+
+
+  if (
+    bestMDEF
+  ) {
+
+    stats.mdef =
+      bestMDEF.value;
+
+
+    console.log(
+      "[OCR] MDEF FROM NOTICE:",
+      stats.mdef,
+      "| screenshot:",
+      bestMDEF.screenshotIndex +
+        1,
+      "| pass:",
+      bestMDEF.mode,
+      "| raw:",
+      JSON.stringify(
+        bestMDEF.raw
+      )
+    );
+
+  } else {
+
+    console.log(
+      "[OCR] MDEF NOTICE NOT FOUND"
+    );
+
+  }
+
+
+  // ==========================================================
+  // REQUIRED FIELD WARNINGS
+  // ==========================================================
+
+  REQUIRED_FIELDS.forEach(
+    function(field) {
+
+      const label =
+        field[0];
+
+      const key =
+        field[1];
+
 
       if (
-        value === undefined ||
-        value === null
+        stats[key] ===
+          null ||
+        stats[key] ===
+          undefined
       ) {
 
         stats.warnings.push(
-          name +
+          label +
           " was not detected."
         );
 
@@ -1233,7 +3244,136 @@ function mergeResults(
 
 
 // ============================================================
-// EXTRACT STATS
+// CANDIDATE DEBUG SUMMARY
+// ============================================================
+
+function printCandidateSummary(
+  candidates
+) {
+
+  console.log(
+    "========================================"
+  );
+
+  console.log(
+    "[OCR] CANDIDATE SUMMARY"
+  );
+
+  console.log(
+    "========================================"
+  );
+
+
+  const keys = [
+
+    ...Object.keys(
+      LABEL_ALIASES
+    ),
+
+    "pdefNotice",
+    "mdefNotice"
+
+  ];
+
+
+  keys.forEach(
+    function(key) {
+
+      const values =
+        candidates[key] ||
+        [];
+
+
+      if (
+        values.length ===
+          0
+      ) {
+
+        console.log(
+          "[OCR CANDIDATES]",
+          key,
+          ": NONE"
+        );
+
+        return;
+
+      }
+
+
+      const sorted =
+        [
+          ...values
+        ]
+          .sort(
+            function(a, b) {
+
+              return (
+                b.score -
+                a.score
+              );
+
+            }
+          )
+          .slice(
+            0,
+            3
+          );
+
+
+      console.log(
+        "[OCR CANDIDATES]",
+        key,
+        ":"
+      );
+
+
+      sorted.forEach(
+        function(candidate) {
+
+          console.log(
+
+            "  value=" +
+            candidate.value +
+
+            " score=" +
+            Number(
+              candidate.score
+            ).toFixed(
+              1
+            ) +
+
+            " screenshot=" +
+            (
+              candidate.screenshotIndex +
+              1
+            ) +
+
+            " pass=" +
+            candidate.mode +
+
+            " raw=" +
+            JSON.stringify(
+              candidate.raw
+            ) +
+
+            " line=" +
+            JSON.stringify(
+              candidate.line
+            )
+
+          );
+
+        }
+      );
+
+    }
+  );
+
+}
+
+
+// ============================================================
+// MAIN
 // ============================================================
 
 async function extractStats(
@@ -1244,7 +3384,8 @@ async function extractStats(
     !Array.isArray(
       imageUrls
     ) ||
-    imageUrls.length === 0
+    imageUrls.length ===
+      0
   ) {
 
     throw new Error(
@@ -1259,11 +3400,11 @@ async function extractStats(
   );
 
   console.log(
-    "[OCR] Starting local ROI OCR"
+    "[OCR] Starting local label-based OCR"
   );
 
   console.log(
-    "[OCR] Images:",
+    "[OCR] Image count:",
     imageUrls.length
   );
 
@@ -1272,14 +3413,15 @@ async function extractStats(
   );
 
 
-  const downloaded = [];
+  const downloaded =
+    [];
 
 
   try {
 
-    // --------------------------------------------------------
+    // ========================================================
     // DOWNLOAD ALL DISCORD ATTACHMENTS FIRST
-    // --------------------------------------------------------
+    // ========================================================
 
     for (
       let i = 0;
@@ -1288,11 +3430,9 @@ async function extractStats(
     ) {
 
       console.log(
-        "[OCR] Downloading image " +
-        (
-          i + 1
-        ) +
-        "/" +
+        "[OCR] Downloading image",
+        i + 1,
+        "of",
         imageUrls.length
       );
 
@@ -1315,12 +3455,36 @@ async function extractStats(
     );
 
 
-    // --------------------------------------------------------
-    // PARSE
-    // --------------------------------------------------------
+    // ========================================================
+    // CANDIDATES
+    // ========================================================
 
-    const pages = [];
+    const allCandidates =
+      {};
 
+
+    Object.keys(
+      LABEL_ALIASES
+    ).forEach(
+      function(key) {
+
+        allCandidates[key] =
+          [];
+
+      }
+    );
+
+
+    allCandidates.pdefNotice =
+      [];
+
+    allCandidates.mdefNotice =
+      [];
+
+
+    // ========================================================
+    // PROCESS EVERY SCREENSHOT
+    // ========================================================
 
     for (
       let i = 0;
@@ -1328,38 +3492,54 @@ async function extractStats(
       i++
     ) {
 
-      console.log(
-        "================================"
-      );
-
-      console.log(
-        "[OCR] Processing screenshot " +
-        (
-          i + 1
-        )
-      );
-
-
-      const page =
-        await parseScreenshot(
-          downloaded[i]
+      const screenshotCandidates =
+        await processScreenshot(
+          downloaded[i],
+          i
         );
 
 
-      pages.push(
-        page
+      Object.keys(
+        screenshotCandidates
+      ).forEach(
+        function(key) {
+
+          if (
+            !allCandidates[key]
+          ) {
+
+            allCandidates[key] =
+              [];
+
+          }
+
+
+          allCandidates[key].push(
+            ...screenshotCandidates[key]
+          );
+
+        }
       );
 
     }
 
 
-    // --------------------------------------------------------
-    // MERGE
-    // --------------------------------------------------------
+    // ========================================================
+    // DEBUG
+    // ========================================================
+
+    printCandidateSummary(
+      allCandidates
+    );
+
+
+    // ========================================================
+    // FINAL
+    // ========================================================
 
     const stats =
       mergeResults(
-        pages
+        allCandidates
       );
 
 
@@ -1388,23 +3568,23 @@ async function extractStats(
 
   } finally {
 
-    // --------------------------------------------------------
-    // CLEANUP LOCAL FILES
-    // --------------------------------------------------------
+    // ========================================================
+    // CLEANUP
+    // ========================================================
 
     for (
-      let i = 0;
-      i < downloaded.length;
-      i++
+      const filePath of downloaded
     ) {
 
       try {
 
         await fs.promises.unlink(
-          downloaded[i]
+          filePath
         );
 
-      } catch (error) {
+      } catch (
+        error
+      ) {
 
         // Ignore cleanup errors.
 
@@ -1424,24 +3604,52 @@ async function extractStats(
 async function shutdownOCR() {
 
   if (
-    worker
+    textWorker
   ) {
 
     try {
 
-      await worker.terminate();
+      await textWorker.terminate();
 
-    } catch (error) {
+    } catch (
+      error
+    ) {
 
       console.log(
-        "[OCR] Worker shutdown error:",
+        "[OCR] Text worker shutdown error:",
         error.message
       );
 
     }
 
 
-    worker =
+    textWorker =
+      null;
+
+  }
+
+
+  if (
+    numericWorker
+  ) {
+
+    try {
+
+      await numericWorker.terminate();
+
+    } catch (
+      error
+    ) {
+
+      console.log(
+        "[OCR] Numeric worker shutdown error:",
+        error.message
+      );
+
+    }
+
+
+    numericWorker =
       null;
 
   }
