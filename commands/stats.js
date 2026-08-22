@@ -41,113 +41,167 @@ const data =
 // ============================================================
 // REQUIRED STAT FIELDS
 // ============================================================
-//
-// Cards are intentionally NOT included.
-//
-// Cards are automatically set to 2-star by sheets.js.
-//
-// ============================================================
 
 const REQUIRED_STATS = [
 
   {
-    key: "hp",
-    label: "HP"
+    key:
+      "hp",
+
+    label:
+      "HP"
   },
 
   {
-    key: "patk",
-    label: "PATK"
+    key:
+      "patk",
+
+    label:
+      "PATK"
   },
 
   {
-    key: "matk",
-    label: "MATK"
+    key:
+      "matk",
+
+    label:
+      "MATK"
   },
 
   {
-    key: "pdef",
-    label: "PDEF (w/o buffs)"
+    key:
+      "pdef",
+
+    label:
+      "PDEF (w/o buffs)"
   },
 
   {
-    key: "mdef",
-    label: "MDEF (w/o buffs)"
+    key:
+      "mdef",
+
+    label:
+      "MDEF (w/o buffs)"
   },
 
   {
-    key: "pvpBonus",
-    label: "PvP DMG Bonus"
+    key:
+      "pvpBonus",
+
+    label:
+      "PvP DMG Bonus"
   },
 
   {
-    key: "pvpReduction",
-    label: "PvP DMG Reduction"
+    key:
+      "pvpReduction",
+
+    label:
+      "PvP DMG Reduction"
   },
 
   {
-    key: "pdmg",
-    label: "PDMG %"
+    key:
+      "pdmg",
+
+    label:
+      "PDMG %"
   },
 
   {
-    key: "mdmg",
-    label: "MDMG %"
+    key:
+      "mdmg",
+
+    label:
+      "MDMG %"
   },
 
   {
-    key: "pdmgReduction",
-    label: "PDMG Reduction %"
+    key:
+      "pdmgReduction",
+
+    label:
+      "PDMG Reduction %"
   },
 
   {
-    key: "mdmgReduction",
-    label: "MDMG Reduction %"
+    key:
+      "mdmgReduction",
+
+    label:
+      "MDMG Reduction %"
   },
 
   {
-    key: "critRes",
-    label: "Crit RES"
+    key:
+      "critRes",
+
+    label:
+      "Crit RES"
   },
 
   {
-    key: "ignorePDEF",
-    label: "Ignore PDEF"
+    key:
+      "ignorePDEF",
+
+    label:
+      "Ignore PDEF"
   },
 
   {
-    key: "ignoreMDEF",
-    label: "Ignore MDEF"
+    key:
+      "ignoreMDEF",
+
+    label:
+      "Ignore MDEF"
   },
 
   {
-    key: "mediumDamage",
-    label: "Medium Damage"
+    key:
+      "mediumDamage",
+
+    label:
+      "Medium Damage"
   },
 
   {
-    key: "mediumReduction",
-    label: "Medium Reduction"
+    key:
+      "mediumReduction",
+
+    label:
+      "Medium Reduction"
   },
 
   {
-    key: "demiDamage",
-    label: "Demi-Human Damage"
+    key:
+      "demiDamage",
+
+    label:
+      "Demi-Human Damage"
   },
 
   {
-    key: "demiReduction",
-    label: "Demi-Human Reduction"
+    key:
+      "demiReduction",
+
+    label:
+      "Demi-Human Reduction"
   },
 
   {
-    key: "equipmentPDEF",
-    label: "Equipment PDEF"
+    key:
+      "equipmentPDEF",
+
+    label:
+      "Equipment PDEF"
   },
 
   {
-    key: "equipmentMDEF",
-    label: "Equipment MDEF"
+    key:
+      "equipmentMDEF",
+
+    label:
+      "Equipment MDEF"
   }
 
 ];
@@ -157,32 +211,9 @@ const REQUIRED_STATS = [
 // SUBMISSION QUEUE
 // ============================================================
 //
-// IMPORTANT:
+// OCR sessions may run concurrently.
 //
-// OCR is allowed to run concurrently.
-//
-// Google Sheets submission + Apps Script refresh is serialized.
-//
-// Example:
-//
-// User A OCR ────────────────┐
-//                            ▼
-// User B OCR ────────────────┐
-//                            ▼
-// User C OCR ────────────────┐
-//                            ▼
-//
-//                       Submission Queue
-//                            │
-//                 ┌──────────┴──────────┐
-//                 ▼                     ▼
-//             User A                User B
-//          Sheets + Refresh      Sheets + Refresh
-//                                        │
-//                                        ▼
-//                                      User C
-//
-// This prevents simultaneous Apps Script report rebuilds.
+// Google Sheets + Apps Script refresh is serialized.
 //
 // ============================================================
 
@@ -199,9 +230,10 @@ function submitStatsQueued(
       async function() {
 
         console.log(
-          "[STATS QUEUE] Starting submission for:",
+          "[STATS QUEUE] Starting submission:",
           submission.name
         );
+
 
         try {
 
@@ -212,7 +244,7 @@ function submitStatsQueued(
         } finally {
 
           console.log(
-            "[STATS QUEUE] Finished submission for:",
+            "[STATS QUEUE] Finished submission:",
             submission.name
           );
 
@@ -221,13 +253,6 @@ function submitStatsQueued(
       }
     );
 
-
-  /*
-   * Keep the queue alive even if one submission fails.
-   *
-   * The current job still receives the rejection because
-   * `job` is returned to the caller.
-   */
 
   submissionQueue =
     job.catch(
@@ -269,20 +294,12 @@ function isFilled(
     typeof value === "string"
   ) {
 
-    return value.trim() !== "";
+    return (
+      value.trim() !== ""
+    );
 
   }
 
-
-  /*
-   * 0 is a valid value.
-   *
-   * This is important for:
-   *
-   * Ignore PDEF: 0
-   * Ignore MDEF: 0
-   * etc.
-   */
 
   return true;
 
@@ -316,7 +333,7 @@ function formatValue(
 
 
 // ============================================================
-// FORMAT PERCENTAGE
+// FORMAT PERCENT
 // ============================================================
 
 function formatPercent(
@@ -345,20 +362,20 @@ function formatPercent(
 
 
 // ============================================================
-// SAFE DISCORD CONTENT
+// SAFE CONTENT
 // ============================================================
 
 function safeDiscordContent(
   content
 ) {
 
-  const MAX_LENGTH =
+  const maxLength =
     1900;
 
 
   if (
     content.length <=
-    MAX_LENGTH
+    maxLength
   ) {
 
     return content;
@@ -370,14 +387,12 @@ function safeDiscordContent(
 
     content.substring(
       0,
-      MAX_LENGTH - 120
+      maxLength - 100
     ) +
 
     "\n\n" +
 
-    "⚠️ Some information was shortened. " +
-
-    "Use **Edit** to review the fields."
+    "⚠️ Some information was shortened."
 
   );
 
@@ -385,7 +400,7 @@ function safeDiscordContent(
 
 
 // ============================================================
-// PARSE MANUAL NUMBER
+// MANUAL NUMBER
 // ============================================================
 
 function parseManualNumber(
@@ -402,24 +417,11 @@ function parseManualNumber(
   }
 
 
-  let text =
+  const text =
     String(
       value
     )
-      .trim();
-
-
-  if (
-    text === ""
-  ) {
-
-    return null;
-
-  }
-
-
-  text =
-    text
+      .trim()
       .replace(
         /,/g,
         ""
@@ -427,8 +429,16 @@ function parseManualNumber(
       .replace(
         /%/g,
         ""
-      )
-      .trim();
+      );
+
+
+  if (
+    !text
+  ) {
+
+    return null;
+
+  }
 
 
   const number =
@@ -513,7 +523,7 @@ function findStatField(
 
 
 // ============================================================
-// BUILD JOB CLASS MENU
+// JOB CLASS MENU
 // ============================================================
 
 function buildJobClassMenu() {
@@ -577,7 +587,7 @@ function buildJobClassMenu() {
 
 
 // ============================================================
-// BUILD CONFIRMATION BUTTONS
+// CONFIRMATION BUTTONS
 // ============================================================
 
 function buildConfirmationButtons(
@@ -628,54 +638,7 @@ function buildConfirmationButtons(
 
 
 // ============================================================
-// BUILD EDIT GROUP MENU
-// ============================================================
-
-function buildEditGroupMenu(
-  token
-) {
-
-  const menu =
-    new StringSelectMenuBuilder()
-
-      .setCustomId(
-        "stats_edit_group_" +
-        token
-      )
-
-      .setPlaceholder(
-        "Choose what you want to edit"
-      )
-
-      .addOptions(
-
-        new StringSelectMenuOptionBuilder()
-
-          .setLabel(
-            "Stats"
-          )
-
-          .setDescription(
-            "Edit OCR-detected player stats"
-          )
-
-          .setValue(
-            "stats"
-          )
-
-      );
-
-
-  return new ActionRowBuilder()
-    .addComponents(
-      menu
-    );
-
-}
-
-
-// ============================================================
-// BUILD STATS EDIT MENU
+// STATS EDIT MENU
 // ============================================================
 
 function buildStatsEditMenu(
@@ -758,7 +721,7 @@ function buildStatsEditMenu(
 
 
 // ============================================================
-// BUILD COMPACT CONFIRMATION
+// CONFIRMATION TEXT
 // ============================================================
 
 function buildConfirmationText(
@@ -786,7 +749,6 @@ function buildConfirmationText(
 
     "\n\n" +
 
-
     "### General\n" +
 
     "HP: **" +
@@ -806,7 +768,6 @@ function buildConfirmationText(
 
     "**\n\n" +
 
-
     "### Defense\n" +
 
     "PDEF: **" +
@@ -820,7 +781,6 @@ function buildConfirmationText(
     ) +
 
     "**\n\n" +
-
 
     "### Combat\n" +
 
@@ -867,7 +827,6 @@ function buildConfirmationText(
 
     "**\n\n" +
 
-
     "### PvP\n" +
 
     "Bonus: **" +
@@ -882,7 +841,6 @@ function buildConfirmationText(
 
     "**\n\n" +
 
-
     "### Target Damage\n" +
 
     "Medium: **" +
@@ -891,6 +849,7 @@ function buildConfirmationText(
     ) +
 
     " / " +
+
     formatPercent(
       stats.mediumReduction
     ) +
@@ -903,12 +862,12 @@ function buildConfirmationText(
     ) +
 
     " / " +
+
     formatPercent(
       stats.demiReduction
     ) +
 
     "**\n\n" +
-
 
     "### Equipment\n" +
 
@@ -925,10 +884,6 @@ function buildConfirmationText(
     "**\n\n";
 
 
-  // ==========================================================
-  // VALIDATION
-  // ==========================================================
-
   if (
     missingStats.length === 0
   ) {
@@ -937,13 +892,15 @@ function buildConfirmationText(
 
       "### ✅ Ready to Submit\n\n" +
 
-      "All required stats have been detected.\n\n" +
+      "All required stats were detected.\n\n" +
 
       "⚠️ **Please verify your stats before submitting.**\n\n" +
 
       "Press **Confirm** to submit.\n" +
 
-      "Press **Edit** to correct any values.";
+      "Press **Edit** to correct any values.\n\n" +
+
+      "🃏 **All cards will automatically be recorded as 2-star.**";
 
   } else {
 
@@ -972,6 +929,65 @@ function buildConfirmationText(
 
 
 // ============================================================
+// DELETE UPLOAD MESSAGE SAFELY
+// ============================================================
+
+async function deleteUploadMessage(
+  message
+) {
+
+  if (
+    !message
+  ) {
+
+    return;
+
+  }
+
+
+  try {
+
+    await message.delete();
+
+
+    console.log(
+      "[STATS] Upload message deleted:",
+      message.id
+    );
+
+  } catch (error) {
+
+    /*
+     * Discord error 10008 means the message is already gone.
+     * This is harmless.
+     */
+
+    if (
+      error &&
+      error.code === 10008
+    ) {
+
+      console.log(
+        "[STATS] Upload message was already deleted:",
+        message.id
+      );
+
+      return;
+
+    }
+
+
+    console.error(
+      "[STATS] Could not delete upload message:",
+      error
+    );
+
+  }
+
+}
+
+
+// ============================================================
 // EXECUTE
 // ============================================================
 
@@ -988,7 +1004,7 @@ async function execute(
 
 
   console.log(
-    "[STATS] Starting /stats for:",
+    "[STATS] Starting /stats:",
     interaction.user.tag,
     "| ID:",
     userId
@@ -999,14 +1015,10 @@ async function execute(
   // JOB CLASS
   // ==========================================================
 
-  const jobMenu =
-    buildJobClassMenu();
-
-
   const jobRow =
     new ActionRowBuilder()
       .addComponents(
-        jobMenu
+        buildJobClassMenu()
       );
 
 
@@ -1031,7 +1043,7 @@ async function execute(
 
 
   // ==========================================================
-  // WAIT FOR JOB CLASS
+  // JOB CLASS COLLECTOR
   // ==========================================================
 
   let selection;
@@ -1079,6 +1091,7 @@ async function execute(
 
     });
 
+
     return;
 
   }
@@ -1087,10 +1100,6 @@ async function execute(
   const selectedClass =
     selection.values[0];
 
-
-  // ==========================================================
-  // UPDATE TO UPLOAD SCREEN
-  // ==========================================================
 
   await selection.update({
 
@@ -1113,15 +1122,13 @@ async function execute(
 
       "• General Stats\n" +
 
-      "• Quasi-Stats\n" +
+      "• Quasi Stats\n" +
 
-      "• Equipment / Damage Stats\n" +
+      "• PDEF/MDEF Notice\n" +
 
-      "• PDEF Notice\n" +
+      "• Equipment / Damage Stats\n\n" +
 
-      "• MDEF Notice\n\n" +
-
-      "ℹ️ **Card information is not required. Cards will automatically be recorded as 2-star.**\n\n" +
+      "🃏 **Card information is not required. All cards are automatically recorded as 2-star.**\n\n" +
 
       "⏱️ You have **2 minutes** to upload your screenshots.",
 
@@ -1131,14 +1138,7 @@ async function execute(
 
 
   // ==========================================================
-  // UPLOAD COLLECTOR
-  // ==========================================================
-  //
-  // This collector belongs ONLY to this /stats session.
-  //
-  // Multiple users can therefore have collectors running
-  // simultaneously.
-  //
+  // SCREENSHOT COLLECTOR
   // ==========================================================
 
   const channel =
@@ -1153,11 +1153,6 @@ async function execute(
 
       filter:
         function(message) {
-
-          /*
-           * Only accept messages from the user who invoked
-           * this particular /stats session.
-           */
 
           return (
             message.author.id ===
@@ -1183,10 +1178,6 @@ async function execute(
       );
 
 
-      // ------------------------------------------------------
-      // IGNORE MESSAGES WITHOUT ATTACHMENTS
-      // ------------------------------------------------------
-
       if (
         message.attachments.size === 0
       ) {
@@ -1196,20 +1187,14 @@ async function execute(
       }
 
 
-      /*
-       * Stop ONLY this user's collector.
-       *
-       * Other /stats sessions have their own collectors.
-       */
-
       collector.stop(
         "screenshots_received"
       );
 
 
-      // ------------------------------------------------------
+      // ========================================================
       // FIND IMAGES
-      // ------------------------------------------------------
+      // ========================================================
 
       const imageAttachments =
         [
@@ -1222,42 +1207,33 @@ async function execute(
               String(
                 attachment.name ||
                 ""
-              ).toLowerCase();
+              )
+                .toLowerCase();
 
 
             const contentType =
               String(
                 attachment.contentType ||
                 ""
-              ).toLowerCase();
-
-
-            const extensionIsImage =
-              /\.(png|jpg|jpeg|webp|gif)$/i
-                .test(
-                  filename
-                );
-
-
-            const contentTypeIsImage =
-              contentType.startsWith(
-                "image/"
-              );
+              )
+                .toLowerCase();
 
 
             return (
-              extensionIsImage ||
-              contentTypeIsImage
+
+              contentType.startsWith(
+                "image/"
+              ) ||
+
+              /\.(png|jpg|jpeg|webp|gif)$/i
+                .test(
+                  filename
+                )
+
             );
 
           }
         );
-
-
-      console.log(
-        "[STATS] Image count:",
-        imageAttachments.length
-      );
 
 
       if (
@@ -1283,9 +1259,11 @@ async function execute(
       }
 
 
-      // ------------------------------------------------------
-      // OCR STATUS
-      // ------------------------------------------------------
+      console.log(
+        "[STATS] Image count:",
+        imageAttachments.length
+      );
+
 
       await interaction.followUp({
 
@@ -1295,9 +1273,9 @@ async function execute(
           imageAttachments.length +
           "** screenshot(s).\n\n" +
 
-          "Reading your stats...\n\n" +
+          "Downloading and reading your stats...\n\n" +
 
-          "This may take a little while.",
+          "Please wait.",
 
         flags:
           MessageFlags.Ephemeral
@@ -1305,46 +1283,27 @@ async function execute(
       });
 
 
-    const imageUrls =
-      imageAttachments.map(
-        function(attachment) {
-          return attachment.url;
-        }
-      );
+      const imageUrls =
+        imageAttachments.map(
+          function(attachment) {
 
-    try {
+            return attachment.url;
 
-      await message.delete();
-
-      console.log(
-        "[STATS] Upload message deleted."
-      );
-
-    } catch (error) {
-
-      if (
-        error.code === 10008
-      ) {
-
-        console.log(
-          "[STATS] Upload message was already deleted."
+          }
         );
 
-      } else {
 
-        console.error(
-          "[STATS] Could not delete upload message:",
-          error
-        );
-
-      }
-
-}
-
-
-      // ------------------------------------------------------
+      // ========================================================
       // OCR
-      // ------------------------------------------------------
+      // ========================================================
+      //
+      // IMPORTANT:
+      //
+      // DO NOT DELETE THE DISCORD MESSAGE BEFORE THIS FINISHES.
+      //
+      // extractStats() downloads the Discord CDN attachments.
+      //
+      // ========================================================
 
       let stats;
 
@@ -1378,6 +1337,16 @@ async function execute(
         });
 
 
+        /*
+         * We can delete the message now because OCR has
+         * finished attempting the downloads.
+         */
+
+        await deleteUploadMessage(
+          message
+        );
+
+
         return;
 
       }
@@ -1385,13 +1354,26 @@ async function execute(
 
       console.log(
         "[STATS] OCR RESULT:",
-        stats
+        JSON.stringify(
+          stats,
+          null,
+          2
+        )
       );
 
 
-      // ------------------------------------------------------
-      // PLAYER LOOKUP
-      // ------------------------------------------------------
+      // ========================================================
+      // OCR SUCCESS
+      // ========================================================
+
+      await deleteUploadMessage(
+        message
+      );
+
+
+      // ========================================================
+      // MEMBER LOOKUP
+      // ========================================================
 
       let member;
 
@@ -1440,7 +1422,7 @@ async function execute(
 
             "❌ Your Discord username is not linked to a player in the **Members List**.\n\n" +
 
-            "Please contact an administrator to have your Discord username linked.",
+            "Please contact an administrator.",
 
           flags:
             MessageFlags.Ephemeral
@@ -1453,25 +1435,15 @@ async function execute(
       }
 
 
-      console.log(
-        "[STATS] Member found:",
-        member
-      );
-
-
-      // ------------------------------------------------------
-      // PLAYER NAME
-      // ------------------------------------------------------
-
       const playerName =
         member.name ||
         stats.name ||
         "";
 
 
-      // ------------------------------------------------------
+      // ========================================================
       // VALIDATION
-      // ------------------------------------------------------
+      // ========================================================
 
       const missingStats =
         getMissingStats(
@@ -1479,9 +1451,9 @@ async function execute(
         );
 
 
-      // ------------------------------------------------------
+      // ========================================================
       // UNIQUE TOKEN
-      // ------------------------------------------------------
+      // ========================================================
 
       const token =
         Date.now().toString(
@@ -1506,9 +1478,9 @@ async function execute(
           );
 
 
-      // ------------------------------------------------------
+      // ========================================================
       // CONFIRMATION
-      // ------------------------------------------------------
+      // ========================================================
 
       const confirmationContent =
         safeDiscordContent(
@@ -1574,15 +1546,9 @@ async function execute(
       );
 
 
-      console.log(
-        "[STATS] Confirmation token:",
-        token
-      );
-
-
-      // ======================================================
+      // ========================================================
       // CONFIRMATION COLLECTOR
-      // ======================================================
+      // ========================================================
 
       const confirmationCollector =
         confirmationMessage.createMessageComponentCollector({
@@ -1609,25 +1575,19 @@ async function execute(
 
           console.log(
             "[STATS] Confirmation component:",
-            componentInteraction.customId,
-            "| User:",
-            componentInteraction.user.tag
+            componentInteraction.customId
           );
 
 
-          // ==================================================
+          // ====================================================
           // CONFIRM
-          // ==================================================
+          // ====================================================
 
           if (
             componentInteraction.customId ===
             "stats_confirm_" +
             token
           ) {
-
-            // ------------------------------------------------
-            // FINAL VALIDATION
-            // ------------------------------------------------
 
             const finalMissingStats =
               getMissingStats(
@@ -1670,9 +1630,9 @@ async function execute(
             }
 
 
-            // ------------------------------------------------
-            // REMOVE BUTTONS IMMEDIATELY
-            // ------------------------------------------------
+            // --------------------------------------------------
+            // DISABLE BUTTONS
+            // --------------------------------------------------
 
             try {
 
@@ -1717,9 +1677,9 @@ async function execute(
             }
 
 
-            // ------------------------------------------------
-            // BUILD SUBMISSION
-            // ------------------------------------------------
+            // --------------------------------------------------
+            // SUBMISSION OBJECT
+            // --------------------------------------------------
 
             const submission = {
 
@@ -1751,11 +1711,7 @@ async function execute(
 
 
             console.log(
-              "[STATS] Final submission:"
-            );
-
-
-            console.log(
+              "[STATS] Final submission:",
               JSON.stringify(
                 submission,
                 null,
@@ -1764,17 +1720,11 @@ async function execute(
             );
 
 
-            // ------------------------------------------------
-            // SERIALIZED SUBMISSION
-            // ------------------------------------------------
+            // --------------------------------------------------
+            // QUEUED GOOGLE SUBMISSION
+            // --------------------------------------------------
 
             try {
-
-              console.log(
-                "[STATS QUEUE] Queuing:",
-                playerName
-              );
-
 
               const result =
                 await submitStatsQueued(
@@ -1787,10 +1737,6 @@ async function execute(
                 playerName
               );
 
-
-              // ------------------------------------------------
-              // RESULT MESSAGE
-              // ------------------------------------------------
 
               let successMessage =
 
@@ -1904,6 +1850,7 @@ async function execute(
                 ) +
 
                 " / " +
+
                 formatPercent(
                   stats.mediumReduction
                 ) +
@@ -1916,6 +1863,7 @@ async function execute(
                 ) +
 
                 " / " +
+
                 formatPercent(
                   stats.demiReduction
                 ) +
@@ -1943,14 +1891,13 @@ async function execute(
 
               if (
                 result &&
-                result.reportsRefreshed === false
+                result.reportsRefreshed ===
+                false
               ) {
 
                 successMessage +=
 
-                  "\n⚠️ **Reports could not be refreshed.** " +
-
-                  "The Stats Submission itself was written successfully.";
+                  "\n⚠️ **Reports could not be refreshed.**";
 
               } else {
 
@@ -2004,7 +1951,7 @@ async function execute(
 
                     "Please contact an administrator.\n\n" +
 
-                    "The submission was **not automatically retried** to prevent duplicate records.",
+                    "The submission was **not automatically retried**.",
 
                   components: []
 
@@ -2025,13 +1972,16 @@ async function execute(
             confirmationCollector.stop(
               "submitted"
             );
+
+
             return;
+
           }
 
 
-          // ==================================================
+          // ====================================================
           // EDIT
-          // ==================================================
+          // ====================================================
 
           if (
             componentInteraction.customId ===
@@ -2045,7 +1995,7 @@ async function execute(
 
                 "## ✏️ Edit Stats\n\n" +
 
-                "Choose the stat you want to edit.",
+                "Select the stat you want to edit.",
 
               components: [
 
@@ -2064,55 +2014,9 @@ async function execute(
           }
 
 
-          // ==================================================
-          // EDIT GROUP
-          // ==================================================
-
-          if (
-            componentInteraction.customId ===
-            "stats_edit_group_" +
-            token
-          ) {
-
-            const group =
-              componentInteraction.values[0];
-
-
-            if (
-              group ===
-              "stats"
-            ) {
-
-              await componentInteraction.update({
-
-                content:
-
-                  "## ✏️ Edit Stats\n\n" +
-
-                  "Select the stat you want to edit.",
-
-                components: [
-
-                  buildStatsEditMenu(
-                    token,
-                    stats
-                  )
-
-                ]
-
-              });
-
-
-              return;
-
-            }
-
-          }
-
-
-          // ==================================================
-          // EDIT STAT FIELD
-          // ==================================================
+          // ====================================================
+          // EDIT FIELD
+          // ====================================================
 
           if (
             componentInteraction.customId ===
@@ -2377,9 +2281,9 @@ async function execute(
       );
 
 
-      // ======================================================
-      // CONFIRMATION COLLECTOR END
-      // ======================================================
+      // ========================================================
+      // CONFIRMATION END
+      // ========================================================
 
       confirmationCollector.on(
         "end",
@@ -2391,7 +2295,7 @@ async function execute(
           console.log(
             "[STATS] Confirmation collector ended:",
             reason,
-            "interactions:",
+            "| interactions:",
             collected.size,
             "| Player:",
             playerName
@@ -2399,6 +2303,7 @@ async function execute(
 
         }
       );
+
     }
   );
 
@@ -2417,7 +2322,7 @@ async function execute(
       console.log(
         "[STATS] Upload collector ended:",
         reason,
-        "messages:",
+        "| messages:",
         collected.size,
         "| User:",
         userId
