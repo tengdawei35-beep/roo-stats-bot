@@ -1908,27 +1908,32 @@ async function execute(
               }
 
 
-              try {
+            try {
 
-                await interaction.editReply({
+              await confirmationMessage.edit({
 
-                  content:
-                    safeDiscordContent(
-                      successMessage
-                    ),
+                content:
+                  safeDiscordContent(
+                    successMessage
+                  ),
 
-                  components: []
+                components: []
 
-                });
+              });
 
-              } catch (error) {
+              console.log(
+                "[STATS] Final confirmation updated successfully:",
+                playerName
+              );
 
-                console.error(
-                  "[STATS] Could not update final confirmation:",
-                  error
-                );
+            } catch (error) {
 
-              }
+              console.error(
+                "[STATS] Could not update final confirmation:",
+                error
+              );
+
+            }
 
 
             } catch (error) {
@@ -1941,7 +1946,7 @@ async function execute(
 
               try {
 
-                await interaction.editReply({
+                await confirmationMessage.edit({
 
                   content:
 
