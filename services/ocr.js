@@ -16,7 +16,7 @@ const crypto =
 
 
 // ============================================================
-// ROOC STATS OCR
+// ROO STATS OCR
 // ============================================================
 //
 // LABEL-DRIVEN OCR
@@ -25,32 +25,43 @@ const crypto =
 //     ↓
 // Full-page OCR
 //     ↓
-// Locate stat labels
+// Identify labels
 //     ↓
-// Locate numeric value associated with label
+// Extract value associated with label
 //     ↓
-// Validate candidate
+// Validate
 //     ↓
-// Multiple preprocessing passes
+// Multiple OCR passes
 //     ↓
-// Select strongest candidate
-//     ↓
-// Merge screenshots
+// Merge candidates
 //
-// IMPORTANT:
+// NO fixed screen coordinates.
+// NO quartile detection.
+// NO ROI parsing.
 //
-// This does NOT use fixed screenshot dimensions,
-// fixed ROIs, quartiles or screen coordinates.
+// IMPORTANT PDEF / MDEF RULE:
 //
-// PDEF / MDEF:
+// Base PDEF is ignored.
+// Base MDEF is ignored.
 //
-//   PDEF = value from PDEF Notice
-//   MDEF = value from MDEF Notice
+// Equipment PDEF from the PDEF Notice is used as PDEF.
+// Equipment MDEF from the MDEF Notice is used as MDEF.
 //
-// Base PDEF/MDEF values are NOT used.
+// Example:
 //
-// Cards are NOT OCR fields.
-// sheets.js handles cards and defaults them to 2-star.
+// Base PDEF:105
+// Equipment PDEF:5514
+//
+// Result:
+// PDEF = 5514
+//
+// Base MDEF:304
+// Equipment MDEF:1485
+//
+// Result:
+// MDEF = 1485
+//
+// General Stats total PDEF/MDEF are NOT used.
 //
 // ============================================================
 
@@ -76,8 +87,7 @@ if (
   fs.mkdirSync(
     TEMP_DIR,
     {
-      recursive:
-        true
+      recursive: true
     }
   );
 
@@ -85,44 +95,37 @@ if (
 
 
 // ============================================================
-// WORKERS
+// OCR WORKER
 // ============================================================
 
-let textWorker =
-  null;
-
-let numericWorker =
+let worker =
   null;
 
 
-// ============================================================
-// TEXT OCR WORKER
-// ============================================================
-
-async function getTextWorker() {
+async function getWorker() {
 
   if (
-    textWorker
+    worker
   ) {
 
-    return textWorker;
+    return worker;
 
   }
 
 
   console.log(
-    "[OCR] Starting text Tesseract worker..."
+    "[OCR] Starting Tesseract worker..."
   );
 
 
-  textWorker =
+  worker =
     await createWorker(
       "eng",
       1
     );
 
 
-  await textWorker.setParameters({
+  await worker.setParameters({
 
     tessedit_pageseg_mode:
       "6",
@@ -136,56 +139,7 @@ async function getTextWorker() {
   });
 
 
-  return textWorker;
-
-}
-
-
-// ============================================================
-// NUMERIC OCR WORKER
-// ============================================================
-
-async function getNumericWorker() {
-
-  if (
-    numericWorker
-  ) {
-
-    return numericWorker;
-
-  }
-
-
-  console.log(
-    "[OCR] Starting numeric Tesseract worker..."
-  );
-
-
-  numericWorker =
-    await createWorker(
-      "eng",
-      1
-    );
-
-
-  await numericWorker.setParameters({
-
-    tessedit_pageseg_mode:
-      "7",
-
-    tessedit_char_whitelist:
-      "0123456789.,%-",
-
-    preserve_interword_spaces:
-      "0",
-
-    user_defined_dpi:
-      "300"
-
-  });
-
-
-  return numericWorker;
+  return worker;
 
 }
 
@@ -194,12 +148,10 @@ async function getNumericWorker() {
 // DOWNLOAD DISCORD IMAGE
 // ============================================================
 //
-// Important:
+// IMPORTANT:
 //
-// stats.js must NOT delete the Discord message until
-// extractStats() has completed this download stage.
-//
-// We also retry transient failures.
+// stats.js must call extractStats()
+// BEFORE deleting the Discord upload message.
 //
 // ============================================================
 
@@ -345,52 +297,10 @@ async function downloadImage(
 
 
 // ============================================================
-// IMAGE METADATA
+// PREPROCESS IMAGE
 // ============================================================
 
-async function getMetadata(
-  imagePath
-) {
-
-  const metadata =
-    await sharp(
-      imagePath
-    )
-      .metadata();
-
-
-  if (
-    !metadata.width ||
-    !metadata.height
-  ) {
-
-    throw new Error(
-      "Unable to determine screenshot dimensions."
-    );
-
-  }
-
-
-  return metadata;
-
-}
-
-
-// ============================================================
-// IMAGE PREPROCESSING
-// ============================================================
-//
-// Multiple passes improve OCR reliability across:
-//
-// - Different phones
-// - Different resolutions
-// - Compression
-// - Dark/light UI
-// - Text contrast
-//
-// ============================================================
-
-async function createPreprocessedImage(
+async function preprocessImage(
   imagePath,
   mode
 ) {
@@ -428,7 +338,8 @@ async function createPreprocessedImage(
   ) {
 
     image =
-      image.normalize();
+      image
+        .normalize();
 
   }
 
@@ -511,6 +422,7 @@ async function createPreprocessedImage(
 
 
   await image
+    .sharpen()
     .png()
     .toFile(
       outputPath
@@ -523,16 +435,53 @@ async function createPreprocessedImage(
 
 
 // ============================================================
+// RUN OCR
+// ============================================================
+
+async function runOCR(
+  imagePath
+) {
+
+  const ocrWorker =
+    await getWorker();
+
+
+  const result =
+    await ocrWorker.recognize(
+      imagePath
+    );
+
+
+  return {
+
+    text:
+      String(
+        result.data.text ||
+        ""
+      ),
+
+    confidence:
+      Number(
+        result.data.confidence ||
+        0
+      )
+
+  };
+
+}
+
+
+// ============================================================
 // NORMALIZE OCR TEXT
 // ============================================================
 
 function normalizeOCRText(
-  value
+  text
 ) {
 
   if (
-    value === undefined ||
-    value === null
+    text === null ||
+    text === undefined
   ) {
 
     return "";
@@ -541,7 +490,7 @@ function normalizeOCRText(
 
 
   return String(
-    value
+    text
   )
 
     .replace(
@@ -550,54 +499,23 @@ function normalizeOCRText(
     )
 
     .replace(
-      /[“”‘’]/g,
-      ""
+      /\t/g,
+      " "
     )
 
     .replace(
-      /[|]/g,
-      "I"
+      /\u00A0/g,
+      " "
     )
 
     .replace(
-      /_/g,
-      ""
-    );
-
-}
-
-
-// ============================================================
-// NORMALIZE LABEL
-// ============================================================
-
-function normalizeLabel(
-  value
-) {
-
-  if (
-    value === undefined ||
-    value === null
-  ) {
-
-    return "";
-
-  }
-
-
-  return String(
-    value
-  )
-    .toUpperCase()
-
-    .replace(
-      /[|]/g,
-      "I"
+      /[“”]/g,
+      "\""
     )
 
     .replace(
-      /[^A-Z0-9]/g,
-      ""
+      /[‘’]/g,
+      "'"
     );
 
 }
@@ -608,12 +526,27 @@ function normalizeLabel(
 // ============================================================
 
 function normalizeSearchText(
-  value
+  text
 ) {
 
-  return normalizeLabel(
-    value
-  );
+  return String(
+    text ||
+    ""
+  )
+
+    .toUpperCase()
+
+    .replace(
+      /[|]/g,
+      "I"
+    )
+
+    .replace(
+      /\s+/g,
+      " "
+    )
+
+    .trim();
 
 }
 
@@ -623,12 +556,16 @@ function normalizeSearchText(
 // ============================================================
 
 function compactLabel(
-  value
+  text
 ) {
 
-  return normalizeLabel(
-    value
-  );
+  return normalizeSearchText(
+    text
+  )
+    .replace(
+      /[^A-Z0-9]/g,
+      ""
+    );
 
 }
 
@@ -754,98 +691,10 @@ function levenshtein(
 
 
 // ============================================================
-// LABEL SIMILARITY
+// FIELD ALIASES
 // ============================================================
 
-function labelSimilarity(
-  actual,
-  expected
-) {
-
-  const a =
-    normalizeLabel(
-      actual
-    );
-
-  const e =
-    normalizeLabel(
-      expected
-    );
-
-
-  if (
-    !a ||
-    !e
-  ) {
-
-    return 0;
-
-  }
-
-
-  if (
-    a === e
-  ) {
-
-    return 1;
-
-  }
-
-
-  if (
-    a.includes(e) ||
-    e.includes(a)
-  ) {
-
-    const shorter =
-      Math.min(
-        a.length,
-        e.length
-      );
-
-    const longer =
-      Math.max(
-        a.length,
-        e.length
-      );
-
-
-    return (
-      shorter /
-      longer
-    );
-
-  }
-
-
-  const distance =
-    levenshtein(
-      a,
-      e
-    );
-
-
-  const maxLength =
-    Math.max(
-      a.length,
-      e.length
-    );
-
-
-  return (
-    1 -
-    distance /
-    maxLength
-  );
-
-}
-
-
-// ============================================================
-// LABEL ALIASES
-// ============================================================
-
-const LABEL_ALIASES = {
+const ALIASES = {
 
   hp: [
 
@@ -858,7 +707,9 @@ const LABEL_ALIASES = {
 
     "PATK",
 
-    "P ATK"
+    "P ATK",
+
+    "P-ATK"
 
   ],
 
@@ -867,7 +718,9 @@ const LABEL_ALIASES = {
 
     "MATK",
 
-    "M ATK"
+    "M ATK",
+
+    "M-ATK"
 
   ],
 
@@ -878,7 +731,7 @@ const LABEL_ALIASES = {
 
     "PVP DMG BON",
 
-    "P DMG BONUS"
+    "PVP BONUS"
 
   ],
 
@@ -889,38 +742,38 @@ const LABEL_ALIASES = {
 
     "PVP DMG RED",
 
-    "P DMG REDUCTION"
+    "PVP REDUCTION"
 
   ],
 
 
   pdmg: [
 
-    "PDMG",
+    "PDMG %",
 
-    "PDMG %"
+    "PDMG"
 
   ],
 
 
   mdmg: [
 
-    "MDMG",
+    "MDMG %",
 
-    "MDMG %"
+    "MDMG"
 
   ],
 
 
   pdmgReduction: [
 
-    "PDMG REDUCTION",
-
     "PDMG REDUCTION %",
 
-    "PDMG-R",
+    "PDMG REDUCTION",
 
     "PDMG-R %",
+
+    "PDMG-R",
 
     "PDMG.R",
 
@@ -931,13 +784,13 @@ const LABEL_ALIASES = {
 
   mdmgReduction: [
 
-    "MDMG REDUCTION",
-
     "MDMG REDUCTION %",
 
-    "MDMG-R",
+    "MDMG REDUCTION",
 
     "MDMG-R %",
+
+    "MDMG-R",
 
     "MDMG.R",
 
@@ -950,21 +803,29 @@ const LABEL_ALIASES = {
 
     "CRIT RES",
 
-    "CRIT RESISTANCE"
+    "CRIT RES."
 
   ],
 
 
   ignorePDEF: [
 
-    "IGNORE PDEF"
+    "IGNORE PDEF",
+
+    "IGNORE P DEF",
+
+    "IGNORE P-DEF"
 
   ],
 
 
   ignoreMDEF: [
 
-    "IGNORE MDEF"
+    "IGNORE MDEF",
+
+    "IGNORE M DEF",
+
+    "IGNORE M-DEF"
 
   ],
 
@@ -973,7 +834,9 @@ const LABEL_ALIASES = {
 
     "EQUIPMENT PDEF",
 
-    "EQUIPMENT PDEF %"
+    "EQUIPMENT PDEF %",
+
+    "EQUIP PDEF"
 
   ],
 
@@ -982,7 +845,9 @@ const LABEL_ALIASES = {
 
     "EQUIPMENT MDEF",
 
-    "EQUIPMENT MDEF %"
+    "EQUIPMENT MDEF %",
+
+    "EQUIP MDEF"
 
   ],
 
@@ -1047,14 +912,18 @@ const LABEL_ALIASES = {
 
   bruteDamage: [
 
-    "DMG VS BRUTE"
+    "DMG VS BRUTE",
+
+    "BRUTE DAMAGE"
 
   ],
 
 
   bruteReduction: [
 
-    "DMG REDUCTION VS BRUTE"
+    "DMG REDUCTION VS BRUTE",
+
+    "BRUTE REDUCTION"
 
   ],
 
@@ -1080,7 +949,7 @@ const LABEL_ALIASES = {
 
 
 // ============================================================
-// LIMITS
+// FIELD LIMITS
 // ============================================================
 
 const LIMITS = {
@@ -1213,16 +1082,6 @@ const LIMITS = {
   demiReduction: [
     0,
     1000
-  ],
-
-  pdefNotice: [
-    0,
-    1000000
-  ],
-
-  mdefNotice: [
-    0,
-    1000000
   ]
 
 };
@@ -1236,16 +1095,6 @@ function validateValue(
   key,
   value
 ) {
-
-  if (
-    value === null ||
-    value === undefined
-  ) {
-
-    return null;
-
-  }
-
 
   const number =
     Number(
@@ -1295,282 +1144,71 @@ function validateValue(
 
 
 // ============================================================
-// REPAIR OCR NUMERIC TEXT
+// REPAIR OCR NUMBER
 // ============================================================
 
 function repairNumericText(
-  value
+  text
 ) {
 
   return String(
-    value ||
+    text ||
     ""
   )
 
     .replace(
-      /O/g,
+      /[Oo]/g,
       "0"
     )
 
     .replace(
-      /o/g,
-      "0"
-    )
-
-    .replace(
-      /I/g,
+      /[Il|]/g,
       "1"
     )
 
     .replace(
-      /l/g,
-      "1"
-    )
-
-    .replace(
-      /S/g,
+      /[Ss]/g,
       "5"
     )
 
     .replace(
-      /s/g,
-      "5"
-    )
-
-    .replace(
-      /B/g,
+      /[Bb]/g,
       "8"
     )
 
     .replace(
-      /b/g,
-      "8"
-    )
-
-    .replace(
-      /\s/g,
+      /,/g,
       ""
-    );
-
-}
-
-
-// ============================================================
-// EXTRACT NUMBERS
-// ============================================================
-
-function extractNumbers(
-  text
-) {
-
-  if (
-    !text
-  ) {
-
-    return [];
-
-  }
-
-
-  const matches =
-    String(
-      text
-    ).match(
-      /-?\d[\d,]*(?:\.\d+)?\s*%?/g
-    );
-
-
-  if (
-    !matches
-  ) {
-
-    return [];
-
-  }
-
-
-  return matches
-    .map(
-      function(raw) {
-
-        const percent =
-          raw
-            .trim()
-            .endsWith(
-              "%"
-            );
-
-
-        let cleaned =
-          raw
-            .replace(
-              /,/g,
-              ""
-            )
-            .replace(
-              /%/g,
-              ""
-            )
-            .trim();
-
-
-        cleaned =
-          repairNumericText(
-            cleaned
-          );
-
-
-        const value =
-          Number(
-            cleaned
-          );
-
-
-        if (
-          !Number.isFinite(
-            value
-          )
-        ) {
-
-          return null;
-
-        }
-
-
-        return {
-
-          value,
-
-          percent,
-
-          raw
-
-        };
-
-      }
     )
-    .filter(
-      Boolean
-    );
+
+    .replace(
+      /%/g,
+      ""
+    )
+
+    .trim();
 
 }
 
 
 // ============================================================
-// EXTRACT LAST VALID NUMBER
+// NUMBER AFTER LABEL
+// ============================================================
+//
+// IMPORTANT:
+//
+// Only takes the number immediately following the label.
+//
+// Example:
+//
+// PDMG 68.01% PDMG.R 143.51%
+//
+// PDMG → 68.01
+// PDMG.R → 143.51
+//
 // ============================================================
 
-function extractLastNumber(
-  line,
-  key
-) {
-
-  const numbers =
-    extractNumbers(
-      line
-    );
-
-
-  for (
-    let i =
-      numbers.length - 1;
-    i >= 0;
-    i--
-  ) {
-
-    const valid =
-      validateValue(
-        key,
-        numbers[i].value
-      );
-
-
-    if (
-      valid !== null
-    ) {
-
-      return {
-
-        value:
-          valid,
-
-        raw:
-          numbers[i].raw,
-
-        percent:
-          numbers[i].percent
-
-      };
-
-    }
-
-  }
-
-
-  return null;
-
-}
-
-
-// ============================================================
-// FIND BEST LABEL ALIAS
-// ============================================================
-
-function findBestAlias(
-  line,
-  aliases
-) {
-
-  let best = {
-
-    similarity:
-      0,
-
-    alias:
-      null
-
-  };
-
-
-  for (
-    const alias of aliases
-  ) {
-
-    const similarity =
-      labelSimilarity(
-        line,
-        alias
-      );
-
-
-    if (
-      similarity >
-      best.similarity
-    ) {
-
-      best = {
-
-        similarity,
-
-        alias
-
-      };
-
-    }
-
-  }
-
-
-  return best;
-
-}
-
-
-// ============================================================
-// FIND VALUE AFTER LABEL
-// ============================================================
-
-function findValueAfterLabel(
+function numberAfterLabel(
   line,
   alias,
   key
@@ -1604,7 +1242,7 @@ function findValueAfterLabel(
 
       "[\\s:._-]*" +
 
-      "(-?\\d[\\d,]*(?:\\.\\d+)?%?)",
+      "(-?\\d[\\d,]*(?:\\.\\d+)?\\s*%?)",
 
       "i"
 
@@ -1628,39 +1266,23 @@ function findValueAfterLabel(
   }
 
 
-  let cleaned =
-    match[1]
-      .replace(
-        /,/g,
-        ""
-      )
-      .replace(
-        /%/g,
-        ""
-      );
-
-
-  cleaned =
+  const cleaned =
     repairNumericText(
-      cleaned
+      match[1]
     );
 
 
-  const number =
-    Number(
-      cleaned
-    );
-
-
-  const valid =
+  const value =
     validateValue(
       key,
-      number
+      Number(
+        cleaned
+      )
     );
 
 
   if (
-    valid === null
+    value === null
   ) {
 
     return null;
@@ -1670,17 +1292,19 @@ function findValueAfterLabel(
 
   return {
 
-    value:
-      valid,
+    value,
 
     raw:
-      match[1],
+      match[1].trim(),
 
     percent:
       match[1]
+        .trim()
         .endsWith(
           "%"
-        )
+        ),
+
+    alias
 
   };
 
@@ -1688,305 +1312,206 @@ function findValueAfterLabel(
 
 
 // ============================================================
-// READ LABEL / VALUE
+// FIND FIELD IN LINE
 // ============================================================
 
-function readLabelValue(
-  lines,
+function findFieldInLine(
+  line,
   key
 ) {
 
   const aliases =
-    LABEL_ALIASES[key];
+    ALIASES[key] ||
+    [];
 
+
+  /*
+   * PvP fields require explicit PVP.
+   *
+   * This prevents:
+   *
+   * PDMG Bonus 405
+   *
+   * from being treated as PvP DMG Bonus.
+   */
 
   if (
-    !aliases
+    key ===
+    "pvpBonus"
   ) {
+
+    const match =
+      String(
+        line
+      ).match(
+
+        /(?:PVP\s+DMG\s+BONUS|PVP\s+BONUS)\s*[:.]?\s*(-?\d[\d,]*(?:\.\d+)?\s*%?)/i
+
+      );
+
+
+    if (
+      !match
+    ) {
+
+      return null;
+
+    }
+
+
+    const value =
+      validateValue(
+        key,
+        Number(
+          repairNumericText(
+            match[1]
+          )
+        )
+      );
+
+
+    if (
+      value === null
+    ) {
+
+      return null;
+
+    }
+
 
     return {
 
-      value:
-        null,
-
-      labelFound:
-        false,
+      value,
 
       raw:
-        ""
+        match[1].trim(),
+
+      alias:
+        "PVP DMG BONUS"
 
     };
 
   }
 
 
-  let bestMatch =
-    null;
-
-
-  for (
-    let i = 0;
-    i < lines.length;
-    i++
+  if (
+    key ===
+    "pvpReduction"
   ) {
 
-    const line =
-      lines[i];
-
-
     const match =
-      findBestAlias(
-        line,
-        aliases
+      String(
+        line
+      ).match(
+
+        /(?:PVP\s+DMG\s+REDUCTION|PVP\s+DMG\s+RED|PVP\s+REDUCTION)\s*[:.]?\s*(-?\d[\d,]*(?:\.\d+)?\s*%?)/i
+
       );
 
 
     if (
-      match.similarity <
-      0.65
+      !match
     ) {
 
-      continue;
+      return null;
 
     }
 
 
-    let value =
-      findValueAfterLabel(
+    const value =
+      validateValue(
+        key,
+        Number(
+          repairNumericText(
+            match[1]
+          )
+        )
+      );
+
+
+    if (
+      value === null
+    ) {
+
+      return null;
+
+    }
+
+
+    return {
+
+      value,
+
+      raw:
+        match[1].trim(),
+
+      alias:
+        "PVP DMG REDUCTION"
+
+    };
+
+  }
+
+
+  for (
+    const alias of aliases
+  ) {
+
+    const result =
+      numberAfterLabel(
         line,
-        match.alias,
+        alias,
         key
       );
 
 
-    /*
-     * If the value is on the next line,
-     * try that as a fallback.
-     */
-
     if (
-      !value &&
-      lines[i + 1]
+      result
     ) {
 
-      value =
-        extractLastNumber(
-          lines[i + 1],
-          key
-        );
-
-    }
-
-
-    if (
-      value
-    ) {
-
-      const score =
-        (
-          match.similarity *
-          100
-        ) +
-        (
-          value.percent
-            ? 5
-            : 0
-        );
-
-
-      if (
-        !bestMatch ||
-        score >
-          bestMatch.score
-      ) {
-
-        bestMatch = {
-
-          value:
-            value.value,
-
-          raw:
-            value.raw,
-
-          percent:
-            value.percent,
-
-          alias:
-            match.alias,
-
-          similarity:
-            match.similarity,
-
-          score,
-
-          line
-
-        };
-
-      }
+      return result;
 
     }
 
   }
 
 
-  if (
-    !bestMatch
-  ) {
-
-    return {
-
-      value:
-        null,
-
-      labelFound:
-        false,
-
-      raw:
-        ""
-
-    };
-
-  }
-
-
-  console.log(
-    "[OCR] Label:",
-    key,
-    "| matched:",
-    bestMatch.alias,
-    "| value:",
-    bestMatch.value,
-    "| line:",
-    JSON.stringify(
-      bestMatch.line
-    )
-  );
-
-
-  return {
-
-    value:
-      bestMatch.value,
-
-    percent:
-      bestMatch.percent,
-
-    labelFound:
-      true,
-
-    raw:
-      bestMatch.raw,
-
-    similarity:
-      bestMatch.similarity,
-
-    score:
-      bestMatch.score,
-
-    line:
-      bestMatch.line
-
-  };
+  return null;
 
 }
 
 
 // ============================================================
-// PAGE CLASSIFICATION
-// ============================================================
-//
-// Classification is ONLY used to determine which special
-// PDEF/MDEF Notice parser to use.
-//
-// It is NOT used to determine screenshot coordinates.
-//
+// PARSE TEXT
 // ============================================================
 
-function classifyPage(
-  text
-) {
-
-  const normalized =
-    normalizeSearchText(
-      text
-    );
-
-
-  const compact =
-    compactLabel(
-      normalized
-    );
-
-
-  return {
-
-    hasPDEFNotice:
-      compact.includes(
-        "PDEFNOTICE"
-      ),
-
-    hasMDEFNotice:
-      compact.includes(
-        "MDEFNOTICE"
-      ),
-
-    hasEquipmentPDEF:
-      compact.includes(
-        "EQUIPMENTPDEF"
-      ),
-
-    hasEquipmentMDEF:
-      compact.includes(
-        "EQUIPMENTMDEF"
-      ),
-
-    hasIgnorePDEF:
-      compact.includes(
-        "IGNOREPDEF"
-      ),
-
-    hasIgnoreMDEF:
-      compact.includes(
-        "IGNOREMDEF"
-      )
-
-  };
-
-}
-
-
-// ============================================================
-// EXTRACT LABEL CANDIDATES
-// ============================================================
-
-function extractFieldsFromText(
+function parseText(
   text,
   screenshotIndex,
   mode,
   confidence
 ) {
 
-  const candidates =
+  const result =
     {};
 
 
   Object.keys(
-    LABEL_ALIASES
+    ALIASES
   ).forEach(
     function(key) {
 
-      candidates[key] =
+      result[key] =
         [];
 
     }
   );
 
 
-  candidates.pdefNotice =
+  result.pdefNotice =
     [];
 
-  candidates.mdefNotice =
+  result.mdefNotice =
     [];
 
 
@@ -2016,148 +1541,40 @@ function extractFieldsFromText(
       );
 
 
-  const page =
-    classifyPage(
-      text
-    );
-
-
-  console.log(
-    "[OCR] PAGE CLASS:",
-    screenshotIndex + 1,
-    mode,
-    page
-  );
-
-
   // ==========================================================
   // STANDARD LABEL FIELDS
   // ==========================================================
-
-  const fields = [
-
-    "hp",
-    "patk",
-    "matk",
-
-    "pvpBonus",
-    "pvpReduction",
-
-    "pdmg",
-    "mdmg",
-
-    "pdmgReduction",
-    "mdmgReduction",
-
-    "critRes",
-
-    "ignorePDEF",
-    "ignoreMDEF",
-
-    "equipmentPDEF",
-    "equipmentMDEF",
-
-    "smallDamage",
-    "smallReduction",
-
-    "mediumDamage",
-    "mediumReduction",
-
-    "largeDamage",
-    "largeReduction",
-
-    "bruteDamage",
-    "bruteReduction",
-
-    "demiDamage",
-    "demiReduction"
-
-  ];
-
 
   for (
     const line of lines
   ) {
 
     for (
-      const key of fields
+      const key of Object.keys(
+        ALIASES
+      )
     ) {
 
       /*
-       * PDEF/MDEF are deliberately NOT in this list.
+       * Equipment PDEF/MDEF percentage fields:
        *
-       * They can only come from their corresponding Notice.
-       */
-
-      const aliases =
-        LABEL_ALIASES[key];
-
-
-      const aliasMatch =
-        findBestAlias(
-          line,
-          aliases
-        );
-
-
-      if (
-        aliasMatch.similarity <
-        0.65
-      ) {
-
-        continue;
-
-      }
-
-
-      /*
-       * PvP Bonus special protection.
+       * These must explicitly be Equipment fields.
        *
-       * We do not want:
+       * This prevents:
        *
-       * PDMG Bonus 360
+       * Equipment PDEF:5514
        *
-       * to become PvP Bonus.
+       * from being interpreted as 5514%.
+       *
+       * The Notice parser handles the absolute values.
        */
 
       if (
         key ===
-        "pvpBonus"
-      ) {
-
-        const explicitPvP =
-          /PVP\s+DMG\s+BON(?:US)?/i
-            .test(
-              line
-            ) ||
-
-          /P\s+DMG\s+BON(?:US)?/i
-            .test(
-              line
-            );
-
-
-        if (
-          !explicitPvP
-        ) {
-
-          continue;
-
-        }
-
-      }
-
-
-      const value =
-        findValueAfterLabel(
-          line,
-          aliasMatch.alias,
-          key
-        );
-
-
-      if (
-        !value
+        "equipmentPDEF" &&
+        !/EQUIPMENT\s+PDEF/i.test(
+          line
+        )
       ) {
 
         continue;
@@ -2165,109 +1582,51 @@ function extractFieldsFromText(
       }
 
 
-      let score =
-        (
-          aliasMatch.similarity *
-          100
-        ) +
-
-        (
-          confidence *
-          0.30
-        );
-
-
-      /*
-       * Exact label matches are preferred.
-       */
-
       if (
-        normalizeLabel(
+        key ===
+        "equipmentMDEF" &&
+        !/EQUIPMENT\s+MDEF/i.test(
           line
-        ).includes(
-          normalizeLabel(
-            aliasMatch.alias
-          )
         )
       ) {
 
-        score +=
-          20;
+        continue;
 
       }
 
 
-      /*
-       * Percentage fields should preferably
-       * have an OCR-detected % sign.
-       */
-
-      const percentageField =
-        [
-
-          "pdmg",
-          "mdmg",
-
-          "pdmgReduction",
-          "mdmgReduction",
-
-          "equipmentPDEF",
-          "equipmentMDEF",
-
-          "smallDamage",
-          "smallReduction",
-
-          "mediumDamage",
-          "mediumReduction",
-
-          "largeDamage",
-          "largeReduction",
-
-          "bruteDamage",
-          "bruteReduction",
-
-          "demiDamage",
-          "demiReduction"
-
-        ].includes(
+      const field =
+        findFieldInLine(
+          line,
           key
         );
 
 
       if (
-        percentageField &&
-        value.percent
+        !field
       ) {
 
-        score +=
-          10;
+        continue;
 
       }
 
 
-      candidates[key].push({
+      result[key].push({
 
         value:
-          value.value,
+          field.value,
 
         raw:
-          value.raw,
-
-        line,
+          field.raw,
 
         alias:
-          aliasMatch.alias,
-
-        similarity:
-          aliasMatch.similarity,
-
-        confidence,
-
-        score,
+          field.alias,
 
         screenshotIndex,
 
-        mode
+        mode,
+
+        confidence
 
       });
 
@@ -2279,123 +1638,89 @@ function extractFieldsFromText(
   // ==========================================================
   // PDEF NOTICE
   // ==========================================================
+  //
+  // Actual screenshot:
+  //
+  // Base PDEF:105
+  // Equipment PDEF:5514
+  //
+  // IMPORTANT:
+  //
+  // Base PDEF is ignored.
+  //
+  // PDEF = Equipment PDEF
+  //
+  // ==========================================================
 
-  if (
-    page.hasPDEFNotice
+  let equipmentPDEF =
+    null;
+
+
+  for (
+    const line of lines
   ) {
 
-    for (
-      let i = 0;
-      i < lines.length;
-      i++
+    const match =
+      line.match(
+        /EQUIPMENT\s+PDEF\s*[:.]?\s*(-?\d[\d,]*(?:\.\d+)?)/i
+      );
+
+
+    if (
+      !match
     ) {
 
-      const line =
-        lines[i];
-
-
-      /*
-       * Ignore Base PDEF.
-       */
-
-      if (
-        /BASE\s+PDEF/i.test(
-          line
-        )
-      ) {
-
-        continue;
-
-      }
-
-
-      /*
-       * Ignore Equipment PDEF itself.
-       *
-       * The Notice value is what we want.
-       */
-
-      if (
-        /EQUIPMENT\s+PDEF/i.test(
-          line
-        )
-      ) {
-
-        continue;
-
-      }
-
-
-      if (
-        /PDEF\s+NOTICE/i.test(
-          line
-        )
-      ) {
-
-        let value =
-          extractLastNumber(
-            line,
-            "pdefNotice"
-          );
-
-
-        /*
-         * Sometimes the number appears
-         * on the next OCR line.
-         */
-
-        if (
-          !value &&
-          lines[i + 1]
-        ) {
-
-          value =
-            extractLastNumber(
-              lines[i + 1],
-              "pdefNotice"
-            );
-
-        }
-
-
-        if (
-          value
-        ) {
-
-          candidates.pdefNotice.push({
-
-            value:
-              value.value,
-
-            raw:
-              value.raw,
-
-            line:
-              line,
-
-            alias:
-              "PDEF NOTICE",
-
-            similarity:
-              1,
-
-            confidence,
-
-            score:
-              150 +
-              confidence * 0.3,
-
-            screenshotIndex,
-
-            mode
-
-          });
-
-        }
-
-      }
+      continue;
 
     }
+
+
+    const value =
+      validateValue(
+        "pdef",
+        Number(
+          repairNumericText(
+            match[1]
+          )
+        )
+      );
+
+
+    if (
+      value === null
+    ) {
+
+      continue;
+
+    }
+
+
+    /*
+     * Only absolute Notice PDEF values belong here.
+     *
+     * Percentage Equipment PDEF from Quasi-Stats
+     * is a separate field and is handled separately.
+     */
+
+    equipmentPDEF =
+      value;
+
+
+    result.pdefNotice.push({
+
+      value,
+
+      raw:
+        "Equipment PDEF:" +
+        value,
+
+      screenshotIndex,
+
+      mode,
+
+      confidence
+
+    });
 
   }
 
@@ -2403,375 +1728,113 @@ function extractFieldsFromText(
   // ==========================================================
   // MDEF NOTICE
   // ==========================================================
-
-  if (
-    page.hasMDEFNotice
-  ) {
-
-    for (
-      let i = 0;
-      i < lines.length;
-      i++
-    ) {
-
-      const line =
-        lines[i];
-
-
-      /*
-       * Ignore Base MDEF.
-       */
-
-      if (
-        /BASE\s+MDEF/i.test(
-          line
-        )
-      ) {
-
-        continue;
-
-      }
-
-
-      /*
-       * Ignore Equipment MDEF itself.
-       */
-
-      if (
-        /EQUIPMENT\s+MDEF/i.test(
-          line
-        )
-      ) {
-
-        continue;
-
-      }
-
-
-      if (
-        /MDEF\s+NOTICE/i.test(
-          line
-        )
-      ) {
-
-        let value =
-          extractLastNumber(
-            line,
-            "mdefNotice"
-          );
-
-
-        if (
-          !value &&
-          lines[i + 1]
-        ) {
-
-          value =
-            extractLastNumber(
-              lines[i + 1],
-              "mdefNotice"
-            );
-
-        }
-
-
-        if (
-          value
-        ) {
-
-          candidates.mdefNotice.push({
-
-            value:
-              value.value,
-
-            raw:
-              value.raw,
-
-            line:
-              line,
-
-            alias:
-              "MDEF NOTICE",
-
-            similarity:
-              1,
-
-            confidence,
-
-            score:
-              150 +
-              confidence * 0.3,
-
-            screenshotIndex,
-
-            mode
-
-          });
-
-        }
-
-      }
-
-    }
-
-  }
-
-
-  return candidates;
-
-}
-
-
-// ============================================================
-// RUN OCR
-// ============================================================
-
-async function runOCR(
-  imagePath
-) {
-
-  const worker =
-    await getTextWorker();
-
-
-  const result =
-    await worker.recognize(
-      imagePath
-    );
-
-
-  return {
-
-    text:
-      result.data.text ||
-      "",
-
-    confidence:
-      Number(
-        result.data.confidence
-      ) || 0,
-
-    words:
-      result.data.words ||
-      []
-
-  };
-
-}
-
-
-// ============================================================
-// PROCESS SCREENSHOT
-// ============================================================
-
-async function processScreenshot(
-  imagePath,
-  screenshotIndex
-) {
-
-  console.log(
-    "========================================"
-  );
-
-  console.log(
-    "[OCR] Processing screenshot:",
-    screenshotIndex + 1
-  );
-
-  console.log(
-    "========================================"
-  );
-
-
-  const candidates =
-    {};
-
-
-  Object.keys(
-    LABEL_ALIASES
-  ).forEach(
-    function(key) {
-
-      candidates[key] =
-        [];
-
-    }
-  );
-
-
-  candidates.pdefNotice =
-    [];
-
-  candidates.mdefNotice =
-    [];
-
-
-  const modes = [
-
-    "normal",
-
-    "contrast",
-
-    "highcontrast",
-
-    "threshold170",
-
-    "threshold200",
-
-    "threshold220"
-
-  ];
+  //
+  // Actual screenshot:
+  //
+  // Base MDEF:304
+  // Equipment MDEF:1485
+  //
+  // IMPORTANT:
+  //
+  // Base MDEF is ignored.
+  //
+  // MDEF = Equipment MDEF
+  //
+  // ==========================================================
+
+  let equipmentMDEF =
+    null;
 
 
   for (
-    const mode of modes
+    const line of lines
   ) {
 
-    let preprocessedPath =
-      null;
-
-
-    try {
-
-      console.log(
-        "[OCR] Pass:",
-        mode,
-        "| screenshot:",
-        screenshotIndex + 1
+    const match =
+      line.match(
+        /EQUIPMENT\s+MDEF\s*[:.]?\s*(-?\d[\d,]*(?:\.\d+)?)/i
       );
 
 
-      preprocessedPath =
-        await createPreprocessedImage(
-          imagePath,
-          mode
-        );
-
-
-      const result =
-        await runOCR(
-          preprocessedPath
-        );
-
-
-      console.log(
-        "[OCR DEBUG] MODE:",
-        mode,
-        "| SCREENSHOT:",
-        screenshotIndex + 1
-      );
-
-
-      console.log(
-        "[OCR DEBUG] CONFIDENCE:",
-        result.confidence
-      );
-
-
-      console.log(
-        "[OCR DEBUG] TEXT LENGTH:",
-        result.text.length
-      );
-
-
-      console.log(
-        "[OCR DEBUG] WORD COUNT:",
-        result.words.length
-      );
-
-
-      console.log(
-        "[OCR DEBUG] RAW TEXT:"
-      );
-
-
-      console.log(
-        result.text
-      );
-
-
-      const parsed =
-        extractFieldsFromText(
-          result.text,
-          screenshotIndex,
-          mode,
-          result.confidence
-        );
-
-
-      Object.keys(
-        parsed
-      ).forEach(
-        function(key) {
-
-          if (
-            !candidates[key]
-          ) {
-
-            candidates[key] =
-              [];
-
-          }
-
-
-          candidates[key].push(
-            ...parsed[key]
-          );
-
-        }
-      );
-
-
-    } catch (
-      error
+    if (
+      !match
     ) {
 
-      console.error(
-        "[OCR] Pass failed:",
-        mode,
-        "| screenshot:",
-        screenshotIndex + 1,
-        "|",
-        error.message
-      );
-
-    } finally {
-
-      if (
-        preprocessedPath
-      ) {
-
-        try {
-
-          await fs.promises.unlink(
-            preprocessedPath
-          );
-
-        } catch (
-          error
-        ) {
-
-          // Ignore cleanup errors.
-
-        }
-
-      }
+      continue;
 
     }
+
+
+    const value =
+      validateValue(
+        "mdef",
+        Number(
+          repairNumericText(
+            match[1]
+          )
+        )
+      );
+
+
+    if (
+      value === null
+    ) {
+
+      continue;
+
+    }
+
+
+    equipmentMDEF =
+      value;
+
+
+    result.mdefNotice.push({
+
+      value,
+
+      raw:
+        "Equipment MDEF:" +
+        value,
+
+      screenshotIndex,
+
+      mode,
+
+      confidence
+
+    });
 
   }
 
 
-  return candidates;
+  /*
+   * Deliberately DO NOT parse General Stats PDEF/MDEF.
+   *
+   * Example:
+   *
+   * PDEF 5619
+   * MDEF 1789
+   *
+   * Those are total values and must not override
+   * the Notice-derived Equipment values.
+   */
+
+
+  return result;
 
 }
 
 
 // ============================================================
-// SELECT BEST CANDIDATE
+// CHOOSE BEST CANDIDATE
+// ============================================================
+//
+// Repeated OCR agreement is heavily weighted.
+//
 // ============================================================
 
-function selectBestCandidate(
+function chooseBest(
   candidates
 ) {
 
@@ -2788,19 +1851,76 @@ function selectBestCandidate(
   }
 
 
-  return [
-    ...candidates
-  ]
-    .sort(
-      function(a, b) {
+  const counts =
+    {};
 
-        return (
-          b.score -
-          a.score
+
+  candidates.forEach(
+    function(candidate) {
+
+      const key =
+        String(
+          candidate.value
         );
 
+
+      counts[key] =
+        (
+          counts[key] ||
+          0
+        ) +
+        1;
+
+    }
+  );
+
+
+  const scored =
+    candidates.map(
+      function(candidate) {
+
+        const count =
+          counts[
+            String(
+              candidate.value
+            )
+          ] ||
+          1;
+
+
+        return {
+
+          candidate,
+
+          score:
+
+            count *
+            1000 +
+
+            Number(
+              candidate.confidence ||
+              0
+            )
+
+        };
+
       }
-    )[0];
+    );
+
+
+  scored.sort(
+    function(a, b) {
+
+      return (
+        b.score -
+        a.score
+      );
+
+    }
+  );
+
+
+  return scored[0].candidate;
 
 }
 
@@ -2905,10 +2025,6 @@ function emptyResult() {
 // ============================================================
 // REQUIRED FIELDS
 // ============================================================
-//
-// Cards intentionally excluded.
-//
-// ============================================================
 
 const REQUIRED_FIELDS = [
 
@@ -2935,16 +2051,6 @@ const REQUIRED_FIELDS = [
   [
     "MDEF",
     "mdef"
-  ],
-
-  [
-    "PvP DMG Bonus",
-    "pvpBonus"
-  ],
-
-  [
-    "PvP DMG Reduction",
-    "pvpReduction"
   ],
 
   [
@@ -3016,6 +2122,197 @@ const REQUIRED_FIELDS = [
 
 
 // ============================================================
+// PROCESS SCREENSHOT
+// ============================================================
+
+async function processScreenshot(
+  imagePath,
+  screenshotIndex
+) {
+
+  const candidates =
+    {};
+
+
+  Object.keys(
+    ALIASES
+  ).forEach(
+    function(key) {
+
+      candidates[key] =
+        [];
+
+    }
+  );
+
+
+  candidates.pdefNotice =
+    [];
+
+  candidates.mdefNotice =
+    [];
+
+
+  const modes = [
+
+    "normal",
+
+    "contrast",
+
+    "highcontrast",
+
+    "threshold170",
+
+    "threshold200",
+
+    "threshold220"
+
+  ];
+
+
+  for (
+    const mode of modes
+  ) {
+
+    let processedPath =
+      null;
+
+
+    try {
+
+      console.log(
+        "[OCR] Pass:",
+        mode,
+        "| screenshot:",
+        screenshotIndex + 1
+      );
+
+
+      processedPath =
+        await preprocessImage(
+          imagePath,
+          mode
+        );
+
+
+      const ocr =
+        await runOCR(
+          processedPath
+        );
+
+
+      console.log(
+        "========================================"
+      );
+
+
+      console.log(
+        "[OCR DEBUG] MODE:",
+        mode,
+        "| SCREENSHOT:",
+        screenshotIndex + 1
+      );
+
+
+      console.log(
+        "[OCR DEBUG] CONFIDENCE:",
+        ocr.confidence
+      );
+
+
+      console.log(
+        "[OCR DEBUG] RAW TEXT:"
+      );
+
+
+      console.log(
+        ocr.text
+      );
+
+
+      console.log(
+        "========================================"
+      );
+
+
+      const parsed =
+        parseText(
+          ocr.text,
+          screenshotIndex,
+          mode,
+          ocr.confidence
+        );
+
+
+      Object.keys(
+        parsed
+      ).forEach(
+        function(key) {
+
+          if (
+            !candidates[key]
+          ) {
+
+            candidates[key] =
+              [];
+
+          }
+
+
+          candidates[key].push(
+            ...parsed[key]
+          );
+
+        }
+      );
+
+
+    } catch (
+      error
+    ) {
+
+      console.error(
+        "[OCR] Pass failed:",
+        mode,
+        "| screenshot:",
+        screenshotIndex + 1,
+        "|",
+        error.message
+      );
+
+    } finally {
+
+      if (
+        processedPath
+      ) {
+
+        try {
+
+          await fs.promises.unlink(
+            processedPath
+          );
+
+        } catch (
+          error
+        ) {
+
+          // Ignore cleanup errors.
+
+        }
+
+      }
+
+    }
+
+  }
+
+
+  return candidates;
+
+}
+
+
+// ============================================================
 // MERGE RESULTS
 // ============================================================
 
@@ -3031,105 +2328,53 @@ function mergeResults(
   // STANDARD FIELDS
   // ==========================================================
 
-  const standardFields = [
+  Object.keys(
+    ALIASES
+  ).forEach(
+    function(key) {
 
-    "hp",
-    "patk",
-    "matk",
-
-    "pvpBonus",
-    "pvpReduction",
-
-    "pdmg",
-    "mdmg",
-
-    "pdmgReduction",
-    "mdmgReduction",
-
-    "critRes",
-
-    "ignorePDEF",
-    "ignoreMDEF",
-
-    "equipmentPDEF",
-    "equipmentMDEF",
-
-    "smallDamage",
-    "smallReduction",
-
-    "mediumDamage",
-    "mediumReduction",
-
-    "largeDamage",
-    "largeReduction",
-
-    "bruteDamage",
-    "bruteReduction",
-
-    "demiDamage",
-    "demiReduction"
-
-  ];
+      const best =
+        chooseBest(
+          candidates[key]
+        );
 
 
-  for (
-    const key of standardFields
-  ) {
+      if (
+        best
+      ) {
 
-    const best =
-      selectBestCandidate(
-        candidates[key]
-      );
+        stats[key] =
+          best.value;
 
 
-    if (
-      best
-    ) {
-
-      stats[key] =
-        best.value;
-
-
-      console.log(
-        "[OCR] SELECTED:",
-        key,
-        "=",
-        best.value,
-        "| screenshot:",
-        best.screenshotIndex +
-          1,
-        "| pass:",
-        best.mode,
-        "| raw:",
-        JSON.stringify(
+        console.log(
+          "[OCR] SELECTED:",
+          key,
+          "=",
+          best.value,
+          "| raw:",
           best.raw
-        )
-      );
+        );
 
-    } else {
-
-      console.log(
-        "[OCR] NO CANDIDATE:",
-        key
-      );
+      }
 
     }
-
-  }
+  );
 
 
   // ==========================================================
   // PDEF
   // ==========================================================
   //
-  // ONLY from PDEF Notice.
+  // ONLY Equipment PDEF from Notice.
   //
-  // Never Equipment PDEF.
+  // Base PDEF is ignored.
+  // General Stats PDEF is ignored.
   //
   // ==========================================================
 
   const bestPDEF =
-    selectBestCandidate(
+    chooseBest(
       candidates.pdefNotice
     );
 
@@ -3143,23 +2388,10 @@ function mergeResults(
 
 
     console.log(
-      "[OCR] PDEF FROM NOTICE:",
+      "[OCR] PDEF FROM EQUIPMENT NOTICE:",
       stats.pdef,
-      "| screenshot:",
-      bestPDEF.screenshotIndex +
-        1,
-      "| pass:",
-      bestPDEF.mode,
       "| raw:",
-      JSON.stringify(
-        bestPDEF.raw
-      )
-    );
-
-  } else {
-
-    console.log(
-      "[OCR] PDEF NOTICE NOT FOUND"
+      bestPDEF.raw
     );
 
   }
@@ -3168,9 +2400,16 @@ function mergeResults(
   // ==========================================================
   // MDEF
   // ==========================================================
+  //
+  // ONLY Equipment MDEF from Notice.
+  //
+  // Base MDEF is ignored.
+  // General Stats MDEF is ignored.
+  //
+  // ==========================================================
 
   const bestMDEF =
-    selectBestCandidate(
+    chooseBest(
       candidates.mdefNotice
     );
 
@@ -3184,30 +2423,17 @@ function mergeResults(
 
 
     console.log(
-      "[OCR] MDEF FROM NOTICE:",
+      "[OCR] MDEF FROM EQUIPMENT NOTICE:",
       stats.mdef,
-      "| screenshot:",
-      bestMDEF.screenshotIndex +
-        1,
-      "| pass:",
-      bestMDEF.mode,
       "| raw:",
-      JSON.stringify(
-        bestMDEF.raw
-      )
-    );
-
-  } else {
-
-    console.log(
-      "[OCR] MDEF NOTICE NOT FOUND"
+      bestMDEF.raw
     );
 
   }
 
 
   // ==========================================================
-  // REQUIRED FIELD WARNINGS
+  // WARNINGS
   // ==========================================================
 
   REQUIRED_FIELDS.forEach(
@@ -3244,7 +2470,7 @@ function mergeResults(
 
 
 // ============================================================
-// CANDIDATE DEBUG SUMMARY
+// DEBUG CANDIDATE SUMMARY
 // ============================================================
 
 function printCandidateSummary(
@@ -3264,19 +2490,9 @@ function printCandidateSummary(
   );
 
 
-  const keys = [
-
-    ...Object.keys(
-      LABEL_ALIASES
-    ),
-
-    "pdefNotice",
-    "mdefNotice"
-
-  ];
-
-
-  keys.forEach(
+  Object.keys(
+    ALIASES
+  ).forEach(
     function(key) {
 
       const values =
@@ -3300,16 +2516,40 @@ function printCandidateSummary(
       }
 
 
-      const sorted =
-        [
-          ...values
-        ]
+      const counts =
+        {};
+
+
+      values.forEach(
+        function(candidate) {
+
+          const value =
+            String(
+              candidate.value
+            );
+
+
+          counts[value] =
+            (
+              counts[value] ||
+              0
+            ) +
+            1;
+
+        }
+      );
+
+
+      const ordered =
+        Object.keys(
+          counts
+        )
           .sort(
             function(a, b) {
 
               return (
-                b.score -
-                a.score
+                counts[b] -
+                counts[a]
               );
 
             }
@@ -3323,50 +2563,69 @@ function printCandidateSummary(
       console.log(
         "[OCR CANDIDATES]",
         key,
-        ":"
-      );
+        ordered.map(
+          function(value) {
 
+            return (
+              value +
+              " (" +
+              counts[value] +
+              "x)"
+            );
 
-      sorted.forEach(
-        function(candidate) {
-
-          console.log(
-
-            "  value=" +
-            candidate.value +
-
-            " score=" +
-            Number(
-              candidate.score
-            ).toFixed(
-              1
-            ) +
-
-            " screenshot=" +
-            (
-              candidate.screenshotIndex +
-              1
-            ) +
-
-            " pass=" +
-            candidate.mode +
-
-            " raw=" +
-            JSON.stringify(
-              candidate.raw
-            ) +
-
-            " line=" +
-            JSON.stringify(
-              candidate.line
-            )
-
-          );
-
-        }
+          }
+        ).join(
+          ", "
+        )
       );
 
     }
+  );
+
+
+  console.log(
+    "[OCR CANDIDATES] pdefNotice:",
+    (
+      candidates.pdefNotice ||
+      []
+    ).map(
+      function(candidate) {
+
+        return (
+          candidate.value +
+          " (" +
+          candidate.raw +
+          ")"
+        );
+
+      }
+    ).join(
+      ", "
+    ) ||
+    "NONE"
+  );
+
+
+  console.log(
+    "[OCR CANDIDATES] mdefNotice:",
+    (
+      candidates.mdefNotice ||
+      []
+    ).map(
+      function(candidate) {
+
+        return (
+          candidate.value +
+          " (" +
+          candidate.raw +
+          ")"
+        );
+
+      }
+    ).join(
+      ", "
+    ) ||
+    "NONE"
   );
 
 }
@@ -3400,11 +2659,11 @@ async function extractStats(
   );
 
   console.log(
-    "[OCR] Starting local label-based OCR"
+    "[OCR] Starting local label-driven OCR"
   );
 
   console.log(
-    "[OCR] Image count:",
+    "[OCR] Images:",
     imageUrls.length
   );
 
@@ -3417,10 +2676,33 @@ async function extractStats(
     [];
 
 
+  const allCandidates =
+    {};
+
+
+  Object.keys(
+    ALIASES
+  ).forEach(
+    function(key) {
+
+      allCandidates[key] =
+        [];
+
+    }
+  );
+
+
+  allCandidates.pdefNotice =
+    [];
+
+  allCandidates.mdefNotice =
+    [];
+
+
   try {
 
     // ========================================================
-    // DOWNLOAD ALL DISCORD ATTACHMENTS FIRST
+    // DOWNLOAD ALL IMAGES FIRST
     // ========================================================
 
     for (
@@ -3456,33 +2738,6 @@ async function extractStats(
 
 
     // ========================================================
-    // CANDIDATES
-    // ========================================================
-
-    const allCandidates =
-      {};
-
-
-    Object.keys(
-      LABEL_ALIASES
-    ).forEach(
-      function(key) {
-
-        allCandidates[key] =
-          [];
-
-      }
-    );
-
-
-    allCandidates.pdefNotice =
-      [];
-
-    allCandidates.mdefNotice =
-      [];
-
-
-    // ========================================================
     // PROCESS EVERY SCREENSHOT
     // ========================================================
 
@@ -3492,7 +2747,7 @@ async function extractStats(
       i++
     ) {
 
-      const screenshotCandidates =
+      const parsed =
         await processScreenshot(
           downloaded[i],
           i
@@ -3500,7 +2755,7 @@ async function extractStats(
 
 
       Object.keys(
-        screenshotCandidates
+        parsed
       ).forEach(
         function(key) {
 
@@ -3515,7 +2770,7 @@ async function extractStats(
 
 
           allCandidates[key].push(
-            ...screenshotCandidates[key]
+            ...parsed[key]
           );
 
         }
@@ -3534,7 +2789,7 @@ async function extractStats(
 
 
     // ========================================================
-    // FINAL
+    // FINAL RESULT
     // ========================================================
 
     const stats =
@@ -3604,55 +2859,32 @@ async function extractStats(
 async function shutdownOCR() {
 
   if (
-    textWorker
+    !worker
   ) {
 
-    try {
-
-      await textWorker.terminate();
-
-    } catch (
-      error
-    ) {
-
-      console.log(
-        "[OCR] Text worker shutdown error:",
-        error.message
-      );
-
-    }
-
-
-    textWorker =
-      null;
+    return;
 
   }
 
 
-  if (
-    numericWorker
+  try {
+
+    await worker.terminate();
+
+  } catch (
+    error
   ) {
 
-    try {
-
-      await numericWorker.terminate();
-
-    } catch (
-      error
-    ) {
-
-      console.log(
-        "[OCR] Numeric worker shutdown error:",
-        error.message
-      );
-
-    }
-
-
-    numericWorker =
-      null;
+    console.log(
+      "[OCR] Worker shutdown error:",
+      error.message
+    );
 
   }
+
+
+  worker =
+    null;
 
 }
 
