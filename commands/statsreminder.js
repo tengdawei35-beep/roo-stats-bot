@@ -4,11 +4,11 @@ const {
 } = require("discord.js");
 
 const {
-  getMembersMissingStatsBeforeDate
+  getMembersMissingWeeklyStats
 } = require("../services/sheets");
 
 const {
-  runStatsReminderBeforeAugust22
+  runWeeklyStatsReminder
 } = require("../services/weeklyStatsReminder");
 
 
@@ -22,7 +22,7 @@ module.exports = {
       )
 
       .setDescription(
-        "Send the stats update reminder."
+        "Send the weekly stats update reminder."
       )
 
       .setDefaultMemberPermissions(
@@ -42,32 +42,17 @@ module.exports = {
     try {
 
       // ======================================================
-      // TEMPORARY CUTOFF
+      // CHECK CURRENT WEEK
       // ======================================================
-
-      const cutoff =
-        new Date(
-          "2026-08-21T16:00:00.000Z"
-        );
-
-
-      console.log(
-
-        "[STATS REMINDER] Temporary cutoff:",
-
-        "2026-08-22 00:00 Malaysia time"
-
-      );
-
-
-      // ======================================================
-      // CHECK MEMBERS
+      //
+      // Monday 00:00 → Sunday/current time
+      //
+      // A player is considered updated if they have submitted
+      // at least one /stats submission during the current week.
       // ======================================================
 
       const missingMembers =
-        await getMembersMissingStatsBeforeDate(
-          cutoff
-        );
+        await getMembersMissingWeeklyStats();
 
 
       console.log(
@@ -89,7 +74,7 @@ module.exports = {
 
             "✅ **No reminder was sent.**\n\n" +
 
-            "Everyone has updated their stats on or after **22 August 2026**."
+            "Everyone has submitted their updated stats this week."
 
         });
 
@@ -104,7 +89,7 @@ module.exports = {
       // ======================================================
 
       const result =
-        await runStatsReminderBeforeAugust22(
+        await runWeeklyStatsReminder(
           interaction.client
         );
 
@@ -113,7 +98,7 @@ module.exports = {
 
         content:
 
-          "✅ **Stats reminder triggered.**\n\n" +
+          "✅ **Weekly stats reminder triggered.**\n\n" +
 
           `Members requiring an update: **${missingMembers.length}**\n` +
 
@@ -121,7 +106,7 @@ module.exports = {
 
           `Members not found on Discord: **${result.unresolved}**\n\n` +
 
-          "Cutoff: **22 August 2026 00:00 Malaysia time**"
+          "**Stats period:** Monday → Sunday"
 
       });
 
