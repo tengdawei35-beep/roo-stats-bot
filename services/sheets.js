@@ -3145,6 +3145,445 @@ async function testMemberLookup(
 
 }
 
+// ============================================================
+// GET MEMBERS WHO HAVE NOT SUBMITTED STATS THIS WEEK
+// ============================================================
+//
+// The week runs:
+// Monday 00:00 Malaysia time
+// through Sunday 23:59 Malaysia time.
+//
+// Members are taken from:
+//     Members List
+//
+// Submission records are taken from:
+//     Stats Submission
+//
+// A player counts as submitted if they have at least one
+// Stats Submission timestamp during the current week.
+//
+// ============================================================
+
+async function getMembersMissingWeeklyStats() {
+
+  const sheets =
+    await getGoogleSheets();
+
+
+  console.log(
+    "[WEEKLY STATS] Checking weekly submissions..."
+  );
+
+
+  // ==========================================================
+  // CURRENT TIME IN MALAYSIA
+  // ==========================================================
+
+  const now =
+    new Date();
+
+
+  const malaysiaParts =
+    new Intl.DateTimeFormat(
+      "en-US",
+      {
+        timeZone: "Asia/Kuala_Lumpur",
+        year: "numeric",
+        month: "numeric",
+        day: "numeric",
+        hour: "numeric",
+        minute: "numeric",
+        second: "numeric",
+        hour12: false
+      }
+    ).formatToParts(now);
+
+
+  const malaysiaValues = {};
+
+
+  malaysiaParts.forEach(
+    function(part) {
+
+      malaysiaValues[
+        part.type
+      ] =
+        part.value;
+
+    }
+  );
+
+
+  const malaysiaYear =
+    Number(
+      malaysiaValues.year
+    );
+
+
+  const malaysiaMonth =
+    Number(
+      malaysiaValues.month
+    );
+
+
+  const malaysiaDay =
+    Number(
+      malaysiaValues.day
+    );
+
+
+  // ==========================================================
+  // FIND MONDAY OF CURRENT WEEK
+  // ==========================================================
+
+  const malaysiaDate =
+    new Date(
+      Date.UTC(
+        malaysiaYear,
+        malaysiaMonth - 1,
+        malaysiaDay
+      )
+    );
+
+
+  const dayOfWeek =
+    malaysiaDate.getUTCDay();
+
+
+  // Sunday = 0
+  // Monday = 1
+
+  const daysSinceMonday =
+    dayOfWeek === 0
+      ? 6
+      : dayOfWeek - 1;
+
+
+  malaysiaDate.setUTCDate(
+    malaysiaDate.getUTCDate() -
+    daysSinceMonday
+  );
+
+
+  // ==========================================================
+  // WEEK START
+  // ==========================================================
+
+  const weekStart =
+    new Date(
+      Date.UTC(
+        malaysiaDate.getUTCFullYear(),
+        malaysiaDate.getUTCMonth(),
+        malaysiaDate.getUTCDate(),
+        -8,
+        0,
+        0
+      )
+    );
+
+
+  console.log(
+    "[WEEKLY STATS] Week started:",
+    weekStart.toISOString()
+  );
+
+
+  // ==========================================================
+  // READ MEMBERS LIST
+  // ==========================================================
+
+  const membersResponse =
+    await sheets.spreadsheets.values.get({
+
+      spreadsheetId:
+        SPREADSHEET_ID,
+
+      range:
+        "'" +
+        MEMBERS_SHEET_NAME +
+        "'!B:V"
+
+    });
+
+
+  const memberRows =
+    membersResponse.data.values ||
+    [];
+
+
+  if (
+    memberRows.length < 2
+  ) {
+
+    console.log(
+      "[WEEKLY STATS] Members List contains no members."
+    );
+
+    return [];
+
+  }
+
+
+  // ==========================================================
+  // READ STATS SUBMISSIONS
+  // ==========================================================
+
+  const statsResponse =
+    await sheets.spreadsheets.values.get({
+
+      spreadsheetId:
+        SPREADSHEET_ID,
+
+      range:
+        "'" +
+        STATS_SHEET_NAME +
+        "'!A:ZZ"
+
+    });
+
+
+  const statsRows =
+    statsResponse.data.values ||
+    [];
+
+
+  if (
+    statsRows.length < 1
+  ) {
+
+    console.log(
+      "[WEEKLY STATS] Stats Submission is empty."
+    );
+
+  }
+
+
+  // ==========================================================
+  // STATS HEADERS
+  // ==========================================================
+
+  const statsHeaders =
+    statsRows[0] ||
+    [];
+
+
+  const statsHeaderMap =
+    buildHeaderMap(
+      statsHeaders
+    );
+
+
+  const statsNameIndex =
+    findHeaderIndex(
+      statsHeaderMap,
+      HEADER_ALIASES.name
+    );
+
+
+  const statsTimestampIndex =
+    findHeaderIndex(
+      statsHeaderMap,
+      HEADER_ALIASES.timestamp
+    );
+
+
+  if (
+    statsNameIndex === -1
+  ) {
+
+    throw new Error(
+      "Stats Submission is missing the Name column."
+    );
+
+  }
+
+
+  if (
+    statsTimestampIndex === -1
+  ) {
+
+    throw new Error(
+      "Stats Submission is missing the Timestamp column."
+    );
+
+  }
+
+
+  // ==========================================================
+  // BUILD SET OF PLAYERS WHO SUBMITTED THIS WEEK
+  // ==========================================================
+
+  const submittedThisWeek =
+    new Set();
+
+
+  for (
+    let i = 1;
+    i < statsRows.length;
+    i++
+  ) {
+
+    const row =
+      statsRows[i] ||
+      [];
+
+
+    const playerName =
+      String(
+        row[
+          statsNameIndex
+        ] ||
+        ""
+      )
+        .trim();
+
+
+    if (
+      !playerName
+    ) {
+
+      continue;
+
+    }
+
+
+    const timestamp =
+      parseTimestamp(
+        row[
+          statsTimestampIndex
+        ]
+      );
+
+
+    if (
+      timestamp >= weekStart &&
+      timestamp <= now
+    ) {
+
+      submittedThisWeek.add(
+        playerName.toLowerCase()
+      );
+
+    }
+
+  }
+
+
+  console.log(
+    "[WEEKLY STATS] Players submitted this week:",
+    submittedThisWeek.size
+  );
+
+
+  // ==========================================================
+  // FIND MEMBERS WHO HAVE NOT SUBMITTED
+  // ==========================================================
+
+  const missingMembers = [];
+
+
+  for (
+    let i = 1;
+    i < memberRows.length;
+    i++
+  ) {
+
+    const row =
+      memberRows[i] ||
+      [];
+
+
+    // B = Name
+    const playerName =
+      String(
+        row[0] ||
+        ""
+      ).trim();
+
+
+    // V = Discord Username
+    const discordUsername =
+      String(
+        row[20] ||
+        ""
+      ).trim();
+
+
+    if (
+      !playerName
+    ) {
+
+      continue;
+
+    }
+
+
+    // Ignore members without a Discord username.
+    if (
+      !discordUsername
+    ) {
+
+      console.log(
+        "[WEEKLY STATS] No Discord username:",
+        playerName
+      );
+
+      continue;
+
+    }
+
+
+    const normalizedName =
+      playerName.toLowerCase();
+
+
+    if (
+      submittedThisWeek.has(
+        normalizedName
+      )
+    ) {
+
+      continue;
+
+    }
+
+
+    missingMembers.push({
+
+      name:
+        playerName,
+
+      discordUsername:
+        discordUsername
+
+    });
+
+  }
+
+
+  console.log(
+    "[WEEKLY STATS] Missing submissions:",
+    missingMembers.length
+  );
+
+
+  missingMembers.forEach(
+    function(member) {
+
+      console.log(
+        "[WEEKLY STATS] Missing:",
+        member.name,
+        "|",
+        member.discordUsername
+      );
+
+    }
+  );
+
+
+  return missingMembers;
+
+}
 
 // ============================================================
 // EXPORTS
@@ -3167,6 +3606,8 @@ module.exports = {
   getPlayerProfileHeaders,
 
   getMembers,
+
+  getMembersMissingWeeklyStats,
 
   testMemberLookup
 

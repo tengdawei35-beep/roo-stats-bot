@@ -1,6 +1,14 @@
 require("dotenv").config();
 
 const {
+  startWeeklyStatsReminder
+} =
+  require("./services/weeklyStatsReminder");
+
+const statsReminderCommand =
+  require("./commands/statsreminder");
+
+const {
   Client,
   GatewayIntentBits,
   Collection,
@@ -70,6 +78,13 @@ client.commands.set(
 client.commands.set(
   applyCommand.data.name,
   applyCommand
+);
+
+//statsreminder
+
+client.commands.set(
+  statsReminderCommand.data.name,
+  statsReminderCommand
 );
 
 
@@ -164,6 +179,9 @@ client.once(
       `[DISCORD] Logged in as ${client.user.tag}`
     );
 
+    console.log(
+      "[VERSION] V2.2 - Reminders"
+    );
 
     console.log(
       "[DISCORD] Guild:",
@@ -173,16 +191,20 @@ client.once(
 
     try {
 
-      await registerCommands();
+  await registerCommands();
 
-    } catch (error) {
+  startWeeklyStatsReminder(
+    client
+  );
 
-      console.error(
-        "[DISCORD] Failed to register slash commands:",
-        error
-      );
+  } catch (error) {
 
-    }
+    console.error(
+      "[DISCORD] Failed to register slash commands:",
+      error
+    );
+
+  }
 
   }
 );
