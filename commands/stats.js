@@ -999,6 +999,22 @@ async function execute(
     interaction.user.id;
 
 
+  // ==========================================================
+  // IMMEDIATELY ACKNOWLEDGE THE SLASH COMMAND
+  // ==========================================================
+  //
+  // This prevents Discord error 10062 (Unknown interaction)
+  // when another /stats session or CPU-heavy OCR is running.
+  //
+
+  await interaction.deferReply({
+
+    flags:
+      MessageFlags.Ephemeral
+
+  });
+
+
   const discordUsername =
     interaction.user.username;
 
@@ -1022,7 +1038,7 @@ async function execute(
       );
 
 
-  await interaction.reply({
+  await interaction.editReply({
 
     content:
 
@@ -1034,10 +1050,7 @@ async function execute(
 
     components: [
       jobRow
-    ],
-
-    flags:
-      MessageFlags.Ephemeral
+    ]
 
   });
 
@@ -1908,35 +1921,35 @@ async function execute(
               }
 
 
-            try {
+              try {
 
-              await interaction.webhook.editMessage(
-                confirmationMessage.id,
-                {
+                await interaction.webhook.editMessage(
+                  confirmationMessage.id,
+                  {
 
-                  content:
-                    safeDiscordContent(
-                      successMessage
-                    ),
+                    content:
+                      safeDiscordContent(
+                        successMessage
+                      ),
 
-                  components: []
+                    components: []
 
-                }
-              );
+                  }
+                );
 
-              console.log(
-                "[STATS] Final confirmation updated successfully:",
-                playerName
-              );
+                console.log(
+                  "[STATS] Final confirmation updated successfully:",
+                  playerName
+                );
 
-            } catch (error) {
+              } catch (error) {
 
-              console.error(
-                "[STATS] Could not update final confirmation:",
-                error
-              );
+                console.error(
+                  "[STATS] Could not update final confirmation:",
+                  error
+                );
 
-            }
+              }
 
 
             } catch (error) {
@@ -1953,17 +1966,18 @@ async function execute(
                   confirmationMessage.id,
                   {
 
-                  content:
+                    content:
 
-                    "## ❌ Stats Submission Failed\n\n" +
+                      "## ❌ Stats Submission Failed\n\n" +
 
-                    "The stats could not be written to Google Sheets.\n\n" +
+                      "The stats could not be written to Google Sheets.\n\n" +
 
-                    "Please contact an administrator.\n\n" +
+                      "Please contact an administrator.\n\n" +
 
-                    "The submission was **not automatically retried**.",
+                      "The submission was **not automatically retried**.",
 
-                  components: []
+                    components: []
+
                   }
 
                 );
