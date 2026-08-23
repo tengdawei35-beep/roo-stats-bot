@@ -2979,14 +2979,52 @@ async function getLatestStatsForPlayer(
 // ============================================================
 // PARSE TIMESTAMP
 // ============================================================
+//
+// Supports all timestamp formats currently found in the sheet:
+//
+// 1. YYYY-MM-DD HH:mm:ss
+// 2. DD/MM/YYYY HH:mm:ss
+// 3. JavaScript Date objects
+// 4. ISO timestamps
+//
+// All timestamps are treated as Malaysia time (UTC+8) when
+// they do not contain an explicit timezone.
+//
+// ============================================================
 
 function parseTimestamp(
   value
 ) {
 
   if (
-    !value
+    value === null ||
+    value === undefined ||
+    value === ""
   ) {
+
+    return new Date(0);
+
+  }
+
+
+  // ==========================================================
+  // GOOGLE SHEETS / JAVASCRIPT DATE OBJECT
+  // ==========================================================
+
+  if (
+    value instanceof Date
+  ) {
+
+    if (
+      !Number.isNaN(
+        value.getTime()
+      )
+    ) {
+
+      return value;
+
+    }
+
 
     return new Date(0);
 
@@ -2999,7 +3037,27 @@ function parseTimestamp(
     ).trim();
 
 
-  const match =
+  if (
+    !text
+  ) {
+
+    return new Date(0);
+
+  }
+
+
+  // ==========================================================
+  // FORMAT 1
+  //
+  // YYYY-MM-DD HH:mm:ss
+  //
+  // Example:
+  // 2026-08-22 18:56:48
+  //
+  // This is Malaysia time (UTC+8).
+  // ==========================================================
+
+  let match =
     text.match(
       /^(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2}):(\d{2})$/
     );
@@ -3008,13 +3066,6 @@ function parseTimestamp(
   if (
     match
   ) {
-
-    /*
-     * Timestamp is Malaysia time.
-     *
-     * Convert the displayed Malaysia timestamp to an
-     * absolute UTC timestamp for comparison.
-     */
 
     const year =
       Number(
@@ -3061,6 +3112,87 @@ function parseTimestamp(
   }
 
 
+  // ==========================================================
+  // FORMAT 2
+  //
+  // DD/MM/YYYY HH:mm:ss
+  //
+  // Example:
+  // 11/08/2026 04:58:01
+  //
+  // IMPORTANT:
+  // This is DD/MM/YYYY, NOT MM/DD/YYYY.
+  //
+  // It is also Malaysia time (UTC+8).
+  // ==========================================================
+
+  match =
+    text.match(
+      /^(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2}):(\d{2})$/
+    );
+
+
+  if (
+    match
+  ) {
+
+    const day =
+      Number(
+        match[1]
+      );
+
+    const month =
+      Number(
+        match[2]
+      );
+
+    const year =
+      Number(
+        match[3]
+      );
+
+    const hour =
+      Number(
+        match[4]
+      );
+
+    const minute =
+      Number(
+        match[5]
+      );
+
+    const second =
+      Number(
+        match[6]
+      );
+
+
+    return new Date(
+      Date.UTC(
+        year,
+        month - 1,
+        day,
+        hour - 8,
+        minute,
+        second
+      )
+    );
+
+  }
+
+
+  // ==========================================================
+  // FORMAT 3
+  //
+  // ISO / OTHER DATE FORMATS
+  //
+  // Example:
+  // 2026-08-22T18:56:48.000Z
+  //
+  // If the string contains an explicit timezone, JavaScript
+  // handles the conversion correctly.
+  // ==========================================================
+
   const parsed =
     new Date(
       text
@@ -3068,17 +3200,29 @@ function parseTimestamp(
 
 
   if (
-    Number.isNaN(
+    !Number.isNaN(
       parsed.getTime()
     )
   ) {
 
-    return new Date(0);
+    return parsed;
 
   }
 
 
-  return parsed;
+  // ==========================================================
+  // INVALID DATE
+  // ==========================================================
+
+  console.warn(
+    "[SHEETS] Could not parse timestamp:",
+    JSON.stringify(
+      value
+    )
+  );
+
+
+  return new Date(0);
 
 }
 
