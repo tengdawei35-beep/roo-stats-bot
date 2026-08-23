@@ -3586,6 +3586,317 @@ async function getMembersMissingWeeklyStats() {
 }
 
 // ============================================================
+// GET MEMBERS WHO HAVE NOT UPDATED STATS BEFORE A CUTOFF DATE
+// ============================================================
+//
+// A member is considered "updated" if they have at least one
+// Stats Submission on or after the supplied cutoff date.
+//
+// Example:
+//     cutoff = 2026-08-21T16:00:00.000Z
+//
+// This corresponds to:
+//     2026-08-22 00:00 Malaysia time.
+//
+// ============================================================
+
+async function getMembersMissingStatsBeforeDate(
+  cutoff
+) {
+
+  const sheets =
+    await getGoogleSheets();
+
+
+  console.log(
+    "[WEEKLY STATS] Checking submissions against cutoff:",
+    cutoff.toISOString()
+  );
+
+
+  // ==========================================================
+  // READ MEMBERS LIST
+  // ==========================================================
+
+  const membersResponse =
+    await sheets.spreadsheets.values.get({
+
+      spreadsheetId:
+        SPREADSHEET_ID,
+
+      range:
+        "'" +
+        MEMBERS_SHEET_NAME +
+        "'!B:V"
+
+    });
+
+
+  const memberRows =
+    membersResponse.data.values ||
+    [];
+
+
+  if (
+    memberRows.length < 2
+  ) {
+
+    console.log(
+      "[WEEKLY STATS] Members List contains no members."
+    );
+
+
+    return [];
+
+  }
+
+
+  // ==========================================================
+  // READ STATS SUBMISSIONS
+  // ==========================================================
+
+  const statsResponse =
+    await sheets.spreadsheets.values.get({
+
+      spreadsheetId:
+        SPREADSHEET_ID,
+
+      range:
+        "'" +
+        STATS_SHEET_NAME +
+        "'!A:ZZ"
+
+    });
+
+
+  const statsRows =
+    statsResponse.data.values ||
+    [];
+
+
+  const statsHeaders =
+    statsRows[0] ||
+    [];
+
+
+  const statsHeaderMap =
+    buildHeaderMap(
+      statsHeaders
+    );
+
+
+  const statsNameIndex =
+    findHeaderIndex(
+      statsHeaderMap,
+      HEADER_ALIASES.name
+    );
+
+
+  const statsTimestampIndex =
+    findHeaderIndex(
+      statsHeaderMap,
+      HEADER_ALIASES.timestamp
+    );
+
+
+  if (
+    statsNameIndex === -1
+  ) {
+
+    throw new Error(
+      "Stats Submission is missing the Name column."
+    );
+
+  }
+
+
+  if (
+    statsTimestampIndex === -1
+  ) {
+
+    throw new Error(
+      "Stats Submission is missing the Timestamp column."
+    );
+
+  }
+
+
+  // ==========================================================
+  // FIND PLAYERS UPDATED ON/AFTER CUTOFF
+  // ==========================================================
+
+  const updatedAfterCutoff =
+    new Set();
+
+
+  for (
+    let i = 1;
+    i < statsRows.length;
+    i++
+  ) {
+
+    const row =
+      statsRows[i] ||
+      [];
+
+
+    const playerName =
+      String(
+        row[
+          statsNameIndex
+        ] ||
+        ""
+      ).trim();
+
+
+    if (
+      !playerName
+    ) {
+
+      continue;
+
+    }
+
+
+    const timestamp =
+      parseTimestamp(
+        row[
+          statsTimestampIndex
+        ]
+      );
+
+
+    if (
+      !timestamp
+    ) {
+
+      continue;
+
+    }
+
+
+    if (
+      timestamp >= cutoff
+    ) {
+
+      updatedAfterCutoff.add(
+        playerName.toLowerCase()
+      );
+
+    }
+
+  }
+
+
+  console.log(
+
+    "[WEEKLY STATS] Players updated on/after cutoff:",
+
+    updatedAfterCutoff.size
+
+  );
+
+
+  // ==========================================================
+  // FIND MEMBERS STILL NEEDING AN UPDATE
+  // ==========================================================
+
+  const missingMembers = [];
+
+
+  for (
+    let i = 1;
+    i < memberRows.length;
+    i++
+  ) {
+
+    const row =
+      memberRows[i] ||
+      [];
+
+
+    // Members List B
+    const playerName =
+      String(
+        row[0] ||
+        ""
+      ).trim();
+
+
+    // Members List V
+    const discordUsername =
+      String(
+        row[20] ||
+        ""
+      ).trim();
+
+
+    if (
+      !playerName
+    ) {
+
+      continue;
+
+    }
+
+
+    if (
+      !discordUsername
+    ) {
+
+      continue;
+
+    }
+
+
+    if (
+      updatedAfterCutoff.has(
+        playerName.toLowerCase()
+      )
+    ) {
+
+      continue;
+
+    }
+
+
+    missingMembers.push({
+
+      name:
+        playerName,
+
+      discordUsername:
+        discordUsername
+
+    });
+
+  }
+
+
+  missingMembers.forEach(
+    function(member) {
+
+      console.log(
+
+        "[WEEKLY STATS] Missing:",
+
+        member.name,
+
+        "|",
+
+        member.discordUsername
+
+      );
+
+    }
+  );
+
+
+  return missingMembers;
+
+}
+
+// ============================================================
 // EXPORTS
 // ============================================================
 
@@ -3608,6 +3919,7 @@ module.exports = {
   getMembers,
 
   getMembersMissingWeeklyStats,
+  getMembersMissingStatsBeforeDate,
 
   testMemberLookup
 
