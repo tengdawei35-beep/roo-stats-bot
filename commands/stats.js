@@ -1910,16 +1910,19 @@ async function execute(
 
             try {
 
-              await confirmationMessage.edit({
+              await interaction.webhook.editMessage(
+                confirmationMessage.id,
+                {
 
-                content:
-                  safeDiscordContent(
-                    successMessage
-                  ),
+                  content:
+                    safeDiscordContent(
+                      successMessage
+                    ),
 
-                components: []
+                  components: []
 
-              });
+                }
+              );
 
               console.log(
                 "[STATS] Final confirmation updated successfully:",
@@ -1946,7 +1949,9 @@ async function execute(
 
               try {
 
-                await confirmationMessage.edit({
+                await interaction.webhook.editMessage(
+                  confirmationMessage.id,
+                  {
 
                   content:
 
@@ -1959,8 +1964,9 @@ async function execute(
                     "The submission was **not automatically retried**.",
 
                   components: []
+                  }
 
-                });
+                );
 
               } catch (editError) {
 
