@@ -8,6 +8,9 @@ const {
 const statsReminderCommand =
   require("./commands/statsreminder");
 
+const checkCommand =
+  require("./commands/check");
+
 const {
   Client,
   GatewayIntentBits,
@@ -87,6 +90,12 @@ client.commands.set(
   statsReminderCommand
 );
 
+//check
+
+client.commands.set(
+  checkCommand.data.name,
+  checkCommand
+);
 
 console.log(
   "[BOOT] Commands loaded:",
@@ -180,7 +189,7 @@ client.once(
     );
 
     console.log(
-      "[VERSION] V2.2 - Reminders"
+      "[VERSION] V2.3 - /check added"
     );
 
     console.log(
