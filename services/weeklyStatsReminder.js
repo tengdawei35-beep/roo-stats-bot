@@ -888,7 +888,7 @@ function startWeeklyStatsReminder(
 
     "[WEEKLY STATS] Automatic reminder:",
 
-    "Sunday",
+    REMINDER_DAY,
 
     REMINDER_HOUR + ":00",
 

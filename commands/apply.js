@@ -700,7 +700,7 @@ async function execute(
       await interaction.awaitModalSubmit({
 
         time:
-          120000,
+          240000,
 
         filter:
           function(modalInteraction) {
@@ -871,7 +871,7 @@ async function execute(
 
       "Cards are **not required**.\n\n" +
 
-      "⏱️ You have **2 minutes**.",
+      "⏱️ You have **4 minutes**.",
 
     components: []
 
@@ -882,7 +882,7 @@ async function execute(
     interaction.channel.createMessageCollector({
 
       time:
-        120000,
+        240000,
 
       filter:
         function(message) {
@@ -1593,7 +1593,7 @@ async function execute(
                 await componentInteraction.awaitModalSubmit({
 
                   time:
-                    120000,
+                    240000,
 
                   filter:
                     function(modalSubmit) {

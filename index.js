@@ -189,7 +189,7 @@ client.once(
     );
 
     console.log(
-      "[VERSION] V2.3 - /check added"
+      "[VERSION] V2.3.2 - Increase duration of OCR upload to 4 minutes"
     );
 
     console.log(

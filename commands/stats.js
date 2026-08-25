@@ -1143,7 +1143,7 @@ async function execute(
 
       "🃏 **Card information is not required. All cards are automatically recorded as 2-star.**\n\n" +
 
-      "⏱️ You have **2 minutes** to upload your screenshots.",
+      "⏱️ You have **4 minutes** to upload your screenshots.",
 
     components: []
 
@@ -1162,7 +1162,7 @@ async function execute(
     channel.createMessageCollector({
 
       time:
-        120000,
+        240000,
 
       filter:
         function(message) {
@@ -2169,7 +2169,7 @@ async function execute(
                 await componentInteraction.awaitModalSubmit({
 
                   time:
-                    120000,
+                    240000,
 
                   filter:
                     function(modalSubmit) {
