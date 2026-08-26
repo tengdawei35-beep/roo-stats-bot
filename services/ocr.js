@@ -19,49 +19,57 @@ const crypto =
 // ROO STATS OCR
 // ============================================================
 //
-// LABEL-DRIVEN OCR
+// GENERAL APPROACH:
 //
 // Screenshot
 //     ↓
+// Download
+//     ↓
+// Multiple preprocessing passes
+//     ↓
 // Full-page OCR
 //     ↓
-// Identify labels
+// Label-based extraction
 //     ↓
-// Extract value associated with label
+// Positional PvP extraction
 //     ↓
-// Validate
+// Candidate merging
 //     ↓
-// Multiple OCR passes
-//     ↓
-// Merge candidates
+// Final stats
 //
-// NO fixed screen coordinates.
-// NO quartile detection.
-// NO ROI parsing.
+// IMPORTANT:
 //
-// IMPORTANT PDEF / MDEF RULE:
+// PDEF/MDEF:
 //
-// Base PDEF is ignored.
-// Base MDEF is ignored.
+// Base PDEF/MDEF are ignored.
 //
-// Equipment PDEF from the PDEF Notice is used as PDEF.
-// Equipment MDEF from the MDEF Notice is used as MDEF.
+// Equipment PDEF from Notice:
+//     -> pdef
 //
-// Example:
+// Equipment MDEF from Notice:
+//     -> mdef
 //
-// Base PDEF:105
-// Equipment PDEF:5514
+// Equipment PDEF %:
+//     -> equipmentPDEF
 //
-// Result:
-// PDEF = 5514
+// Equipment MDEF %:
+//     -> equipmentMDEF
 //
-// Base MDEF:304
-// Equipment MDEF:1485
 //
-// Result:
-// MDEF = 1485
+// IMPORTANT PvP CHANGE:
 //
-// General Stats total PDEF/MDEF are NOT used.
+// PvP DMG Reduction and PvP DMG Bonus are NOT reliably
+// identified by their labels because the game scrolls the
+// label text.
+//
+// Their numbers are always located in fixed positions:
+//
+//     Bottom-left  = PvP DMG Reduction
+//     Bottom-right = PvP DMG Bonus
+//
+// Therefore positional OCR is now the PRIMARY method.
+//
+// Label OCR remains as a fallback.
 //
 // ============================================================
 
@@ -87,7 +95,8 @@ if (
   fs.mkdirSync(
     TEMP_DIR,
     {
-      recursive: true
+      recursive:
+        true
     }
   );
 
@@ -95,12 +104,19 @@ if (
 
 
 // ============================================================
-// OCR WORKER
+// OCR WORKERS
 // ============================================================
 
 let worker =
   null;
 
+let numericWorker =
+  null;
+
+
+// ============================================================
+// TEXT OCR WORKER
+// ============================================================
 
 async function getWorker() {
 
@@ -114,7 +130,7 @@ async function getWorker() {
 
 
   console.log(
-    "[OCR] Starting Tesseract worker..."
+    "[OCR] Starting Tesseract text worker..."
   );
 
 
@@ -145,14 +161,144 @@ async function getWorker() {
 
 
 // ============================================================
-// DOWNLOAD DISCORD IMAGE
+// NUMERIC OCR WORKER
 // ============================================================
 //
-// IMPORTANT:
+// Used specifically for the fixed-position PvP numbers.
 //
-// stats.js must call extractStats()
-// BEFORE deleting the Discord upload message.
+// The crop contains only the number, so:
 //
+//     PVP label OCR
+//
+// is completely avoided.
+//
+// ============================================================
+
+async function getNumericWorker() {
+
+  if (
+    numericWorker
+  ) {
+
+    return numericWorker;
+
+  }
+
+
+  console.log(
+    "[OCR] Starting Tesseract numeric worker..."
+  );
+
+
+  numericWorker =
+    await createWorker(
+      "eng",
+      1
+    );
+
+
+  await numericWorker.setParameters({
+
+    tessedit_pageseg_mode:
+      "7",
+
+    tessedit_char_whitelist:
+      "0123456789",
+
+    user_defined_dpi:
+      "300"
+
+  });
+
+
+  return numericWorker;
+
+}
+
+
+// ============================================================
+// ROI HELPER
+// ============================================================
+//
+// Coordinates are normalized:
+//
+// x = 0.0 - 1.0
+// y = 0.0 - 1.0
+// width = 0.0 - 1.0
+// height = 0.0 - 1.0
+//
+// ============================================================
+
+function roi(
+  x,
+  y,
+  width,
+  height
+) {
+
+  return {
+
+    x,
+    y,
+    width,
+    height
+
+  };
+
+}
+
+
+// ============================================================
+// PVP POSITIONAL ROIS
+// ============================================================
+//
+// Based on the supplied Quasi-Stats screenshot.
+//
+// Screenshot:
+//
+//     PDMG Reduction              PVP DMG Bonus
+//          2423                       3093
+//
+// The labels themselves are NOT used.
+//
+// Only the numeric regions are OCR'd.
+//
+// ============================================================
+
+const PVP_POSITIONAL_ROIS = {
+
+  pvpReduction:
+    roi(
+
+      0.30,
+
+      0.885,
+
+      0.22,
+
+      0.085
+
+    ),
+
+
+  pvpBonus:
+    roi(
+
+      0.79,
+
+      0.885,
+
+      0.20,
+
+      0.085
+
+    )
+
+};
+
+
+// ============================================================
+// DOWNLOAD DISCORD IMAGE
 // ============================================================
 
 async function downloadImage(
@@ -297,7 +443,23 @@ async function downloadImage(
 
 
 // ============================================================
-// PREPROCESS IMAGE
+// IMAGE METADATA
+// ============================================================
+
+async function getImageMetadata(
+  imagePath
+) {
+
+  return await sharp(
+    imagePath
+  )
+    .metadata();
+
+}
+
+
+// ============================================================
+// PREPROCESS FULL IMAGE
 // ============================================================
 
 async function preprocessImage(
@@ -435,7 +597,261 @@ async function preprocessImage(
 
 
 // ============================================================
-// RUN OCR
+// PREPROCESS PVP NUMBER ROI
+// ============================================================
+//
+// The crop is taken from the ORIGINAL screenshot.
+//
+// We then enlarge the crop significantly before OCR.
+//
+// ============================================================
+
+async function preprocessPvpNumber(
+  imagePath,
+  region,
+  mode
+) {
+
+  const metadata =
+    await getImageMetadata(
+      imagePath
+    );
+
+
+  const sourceWidth =
+    Number(
+      metadata.width
+    );
+
+
+  const sourceHeight =
+    Number(
+      metadata.height
+    );
+
+
+  if (
+    !sourceWidth ||
+    !sourceHeight
+  ) {
+
+    throw new Error(
+      "Unable to determine source image dimensions."
+    );
+
+  }
+
+
+  let left =
+    Math.round(
+      sourceWidth *
+      region.x
+    );
+
+
+  let top =
+    Math.round(
+      sourceHeight *
+      region.y
+    );
+
+
+  let width =
+    Math.round(
+      sourceWidth *
+      region.width
+    );
+
+
+  let height =
+    Math.round(
+      sourceHeight *
+      region.height
+    );
+
+
+  // ----------------------------------------------------------
+  // Safety bounds
+  // ----------------------------------------------------------
+
+  left =
+    Math.max(
+      0,
+      Math.min(
+        left,
+        sourceWidth - 1
+      )
+    );
+
+
+  top =
+    Math.max(
+      0,
+      Math.min(
+        top,
+        sourceHeight - 1
+      )
+    );
+
+
+  width =
+    Math.max(
+      1,
+      Math.min(
+        width,
+        sourceWidth - left
+      )
+    );
+
+
+  height =
+    Math.max(
+      1,
+      Math.min(
+        height,
+        sourceHeight - top
+      )
+    );
+
+
+  const outputPath =
+    path.join(
+      TEMP_DIR,
+      crypto.randomUUID() +
+      "-pvp-" +
+      mode +
+      ".png"
+    );
+
+
+  let image =
+    sharp(
+      imagePath
+    )
+      .extract({
+
+        left,
+        top,
+        width,
+        height
+
+      })
+      .resize({
+
+        width:
+          1000,
+
+        withoutEnlargement:
+          false
+
+      })
+      .grayscale();
+
+
+  if (
+    mode ===
+    "normal"
+  ) {
+
+    image =
+      image
+        .normalize();
+
+  }
+
+
+  if (
+    mode ===
+    "contrast"
+  ) {
+
+    image =
+      image
+        .normalize()
+        .linear(
+          1.5,
+          -45
+        );
+
+  }
+
+
+  if (
+    mode ===
+    "highcontrast"
+  ) {
+
+    image =
+      image
+        .normalize()
+        .linear(
+          1.8,
+          -80
+        );
+
+  }
+
+
+  if (
+    mode ===
+    "threshold170"
+  ) {
+
+    image =
+      image
+        .normalize()
+        .threshold(
+          170
+        );
+
+  }
+
+
+  if (
+    mode ===
+    "threshold200"
+  ) {
+
+    image =
+      image
+        .normalize()
+        .threshold(
+          200
+        );
+
+  }
+
+
+  if (
+    mode ===
+    "threshold220"
+  ) {
+
+    image =
+      image
+        .normalize()
+        .threshold(
+          220
+        );
+
+  }
+
+
+  await image
+    .sharpen()
+    .png()
+    .toFile(
+      outputPath
+    );
+
+
+  return outputPath;
+
+}
+
+
+// ============================================================
+// RUN FULL OCR
 // ============================================================
 
 async function runOCR(
@@ -444,6 +860,43 @@ async function runOCR(
 
   const ocrWorker =
     await getWorker();
+
+
+  const result =
+    await ocrWorker.recognize(
+      imagePath
+    );
+
+
+  return {
+
+    text:
+      String(
+        result.data.text ||
+        ""
+      ),
+
+    confidence:
+      Number(
+        result.data.confidence ||
+        0
+      )
+
+  };
+
+}
+
+
+// ============================================================
+// RUN NUMERIC OCR
+// ============================================================
+
+async function runNumericOCR(
+  imagePath
+) {
+
+  const ocrWorker =
+    await getNumericWorker();
 
 
   const result =
@@ -691,7 +1144,85 @@ function levenshtein(
 
 
 // ============================================================
-// FIELD ALIASES
+// LABEL SIMILARITY
+// ============================================================
+
+function labelSimilarity(
+  actual,
+  expected
+) {
+
+  const a =
+    compactLabel(
+      actual
+    );
+
+
+  const b =
+    compactLabel(
+      expected
+    );
+
+
+  if (
+    !a ||
+    !b
+  ) {
+
+    return 0;
+
+  }
+
+
+  if (
+    a === b
+  ) {
+
+    return 1;
+
+  }
+
+
+  if (
+    a.includes(b) ||
+    b.includes(a)
+  ) {
+
+    return (
+      Math.min(
+        a.length,
+        b.length
+      ) /
+      Math.max(
+        a.length,
+        b.length
+      )
+    );
+
+  }
+
+
+  return (
+
+    1 -
+
+    levenshtein(
+      a,
+      b
+    ) /
+
+    Math.max(
+      a.length,
+      b.length
+    )
+
+  );
+
+}
+
+
+// ============================================================
+// LABEL ALIASES
 // ============================================================
 
 const ALIASES = {
@@ -732,7 +1263,9 @@ const ALIASES = {
     "PVP DMG BON",
 
     "PVP BONUS",
+
     "VP DMG BONUS",
+
     "P DMG BONUS"
 
   ],
@@ -745,11 +1278,10 @@ const ALIASES = {
     "PVP DMG RED",
 
     "PVP REDUCTION",
+
     "VP DMG REDUCTION",
-    "P DMG REDUCTION",
-    "VP DMG REDUC",
-    "P DMG REDUCT",
-    "P DMG REDUCI"
+
+    "P DMG REDUCTION"
 
   ],
 
@@ -956,7 +1488,7 @@ const ALIASES = {
 
 
 // ============================================================
-// FIELD LIMITS
+// LIMITS
 // ============================================================
 
 const LIMITS = {
@@ -1201,19 +1733,6 @@ function repairNumericText(
 // ============================================================
 // NUMBER AFTER LABEL
 // ============================================================
-//
-// IMPORTANT:
-//
-// Only takes the number immediately following the label.
-//
-// Example:
-//
-// PDMG 68.01% PDMG.R 143.51%
-//
-// PDMG → 68.01
-// PDMG.R → 143.51
-//
-// ============================================================
 
 function numberAfterLabel(
   line,
@@ -1332,15 +1851,9 @@ function findFieldInLine(
     [];
 
 
-  /*
-   * PvP fields require explicit PVP.
-   *
-   * This prevents:
-   *
-   * PDMG Bonus 405
-   *
-   * from being treated as PvP DMG Bonus.
-   */
+  // ----------------------------------------------------------
+  // PVP BONUS LABEL FALLBACK
+  // ----------------------------------------------------------
 
   if (
     key ===
@@ -1352,7 +1865,7 @@ function findFieldInLine(
         line
       ).match(
 
-        /(?:PVP\s+DMG\s+BONUS|PVP\s+BONUS)\s*[:.]?\s*(-?\d[\d,]*(?:\.\d+)?\s*%?)/i
+        /(?:PVP\s+DMG\s+BONUS|PVP\s+DMG\s+BON|PVP\s+BONUS)\s*[:.]?\s*(-?\d[\d,]*(?:\.\d+)?\s*%?)/i
 
       );
 
@@ -1400,6 +1913,10 @@ function findFieldInLine(
 
   }
 
+
+  // ----------------------------------------------------------
+  // PVP REDUCTION LABEL FALLBACK
+  // ----------------------------------------------------------
 
   if (
     key ===
@@ -1460,6 +1977,121 @@ function findFieldInLine(
   }
 
 
+  // ----------------------------------------------------------
+  // EQUIPMENT PDEF/MDEF %
+  //
+  // MUST contain %
+  // ----------------------------------------------------------
+
+  if (
+    key ===
+      "equipmentPDEF" ||
+    key ===
+      "equipmentMDEF"
+  ) {
+
+    for (
+      const alias of aliases
+    ) {
+
+      const escaped =
+        alias
+          .trim()
+          .split(
+            /\s+/
+          )
+          .map(
+            function(part) {
+
+              return part.replace(
+                /[.*+?^${}()|[\]\\]/g,
+                "\\$&"
+              );
+
+            }
+          )
+          .join(
+            "\\s*"
+          );
+
+
+      const regex =
+        new RegExp(
+
+          escaped +
+
+          "[\\s:._-]*" +
+
+          "(-?\\d[\\d,]*(?:\\.\\d+)?\\s*%)",
+
+          "i"
+
+        );
+
+
+      const match =
+        String(
+          line
+        ).match(
+          regex
+        );
+
+
+      if (
+        !match
+      ) {
+
+        continue;
+
+      }
+
+
+      const value =
+        validateValue(
+          key,
+          Number(
+            repairNumericText(
+              match[1]
+            )
+          )
+        );
+
+
+      if (
+        value === null
+      ) {
+
+        continue;
+
+      }
+
+
+      return {
+
+        value,
+
+        raw:
+          match[1].trim(),
+
+        percent:
+          true,
+
+        alias
+
+      };
+
+    }
+
+
+    return null;
+
+  }
+
+
+  // ----------------------------------------------------------
+  // OTHER FIELDS
+  // ----------------------------------------------------------
+
   for (
     const alias of aliases
   ) {
@@ -1489,7 +2121,7 @@ function findFieldInLine(
 
 
 // ============================================================
-// PARSE TEXT
+// PARSE FULL OCR TEXT
 // ============================================================
 
 function parseText(
@@ -1549,12 +2181,20 @@ function parseText(
 
 
   // ==========================================================
-  // STANDARD LABEL FIELDS
+  // STANDARD FIELDS
   // ==========================================================
 
   for (
-    const line of lines
+    let lineIndex = 0;
+    lineIndex < lines.length;
+    lineIndex++
   ) {
+
+    const line =
+      lines[
+        lineIndex
+      ];
+
 
     for (
       const key of Object.keys(
@@ -1562,19 +2202,9 @@ function parseText(
       )
     ) {
 
-      /*
-       * Equipment PDEF/MDEF percentage fields:
-       *
-       * These must explicitly be Equipment fields.
-       *
-       * This prevents:
-       *
-       * Equipment PDEF:5514
-       *
-       * from being interpreted as 5514%.
-       *
-       * The Notice parser handles the absolute values.
-       */
+      // ------------------------------------------------------
+      // Equipment PDEF/MDEF must explicitly contain Equipment.
+      // ------------------------------------------------------
 
       if (
         key ===
@@ -1610,7 +2240,50 @@ function parseText(
 
 
       if (
-        !field
+        field
+      ) {
+
+        result[key].push({
+
+          value:
+            field.value,
+
+          raw:
+            field.raw,
+
+          alias:
+            field.alias,
+
+          screenshotIndex,
+
+          mode,
+
+          confidence,
+
+          source:
+            "label"
+
+        });
+
+        continue;
+
+      }
+
+
+      // ------------------------------------------------------
+      // Label/value may be split over two lines.
+      //
+      // This is mainly a fallback for unusual OCR formatting.
+      // ------------------------------------------------------
+
+      const next =
+        lines[
+          lineIndex + 1
+        ];
+
+
+      if (
+        !next
       ) {
 
         continue;
@@ -1618,24 +2291,71 @@ function parseText(
       }
 
 
-      result[key].push({
+      for (
+        const alias of
+          ALIASES[key] ||
+          []
+      ) {
 
-        value:
-          field.value,
+        const similarity =
+          labelSimilarity(
+            line,
+            alias
+          );
 
-        raw:
-          field.raw,
 
-        alias:
-          field.alias,
+        if (
+          similarity <
+          0.70
+        ) {
 
-        screenshotIndex,
+          continue;
 
-        mode,
+        }
 
-        confidence
 
-      });
+        const nextField =
+          numberAfterLabel(
+            next,
+            "",
+            key
+          );
+
+
+        if (
+          !nextField
+        ) {
+
+          continue;
+
+        }
+
+
+        result[key].push({
+
+          value:
+            nextField.value,
+
+          raw:
+            nextField.raw,
+
+          alias,
+
+          screenshotIndex,
+
+          mode,
+
+          confidence,
+
+          source:
+            "label-next-line"
+
+        });
+
+
+        break;
+
+      }
 
     }
 
@@ -1646,22 +2366,17 @@ function parseText(
   // PDEF NOTICE
   // ==========================================================
   //
-  // Actual screenshot:
+  // We specifically look for:
   //
-  // Base PDEF:105
-  // Equipment PDEF:5514
+  // Equipment PDEF:5041
   //
-  // IMPORTANT:
+  // BUT:
   //
-  // Base PDEF is ignored.
+  // Equipment PDEF:32.00%
   //
-  // PDEF = Equipment PDEF
+  // is rejected here.
   //
   // ==========================================================
-
-  let equipmentPDEF =
-    null;
-
 
   for (
     const line of lines
@@ -1669,13 +2384,37 @@ function parseText(
 
     const match =
       line.match(
-        /EQUIPMENT\s+PDEF\s*[:.]?\s*(-?\d[\d,]*(?:\.\d+)?)/i
+
+        /EQUIPMENT\s+PDEF\s*[:.]?\s*(-?\d[\d,]*(?:\.\d+)?\s*%?)/i
+
       );
 
 
     if (
       !match
     ) {
+
+      continue;
+
+    }
+
+
+    const rawValue =
+      match[1]
+        .trim();
+
+
+    if (
+      rawValue.endsWith(
+        "%"
+      )
+    ) {
+
+      console.log(
+        "[OCR] Ignoring percentage Equipment PDEF in absolute PDEF parser:",
+        rawValue
+      );
+
 
       continue;
 
@@ -1687,7 +2426,7 @@ function parseText(
         "pdef",
         Number(
           repairNumericText(
-            match[1]
+            rawValue
           )
         )
       );
@@ -1702,30 +2441,21 @@ function parseText(
     }
 
 
-    /*
-     * Only absolute Notice PDEF values belong here.
-     *
-     * Percentage Equipment PDEF from Quasi-Stats
-     * is a separate field and is handled separately.
-     */
-
-    equipmentPDEF =
-      value;
-
-
     result.pdefNotice.push({
 
       value,
 
       raw:
-        "Equipment PDEF:" +
-        value,
+        rawValue,
 
       screenshotIndex,
 
       mode,
 
-      confidence
+      confidence,
+
+      source:
+        "equipment-pdef-notice"
 
     });
 
@@ -1735,23 +2465,6 @@ function parseText(
   // ==========================================================
   // MDEF NOTICE
   // ==========================================================
-  //
-  // Actual screenshot:
-  //
-  // Base MDEF:304
-  // Equipment MDEF:1485
-  //
-  // IMPORTANT:
-  //
-  // Base MDEF is ignored.
-  //
-  // MDEF = Equipment MDEF
-  //
-  // ==========================================================
-
-  let equipmentMDEF =
-    null;
-
 
   for (
     const line of lines
@@ -1759,7 +2472,9 @@ function parseText(
 
     const match =
       line.match(
-        /EQUIPMENT\s+MDEF\s*[:.]?\s*(-?\d[\d,]*(?:\.\d+)?)/i
+
+        /EQUIPMENT\s+MDEF\s*[:.]?\s*(-?\d[\d,]*(?:\.\d+)?\s*%?)/i
+
       );
 
 
@@ -1772,12 +2487,34 @@ function parseText(
     }
 
 
+    const rawValue =
+      match[1]
+        .trim();
+
+
+    if (
+      rawValue.endsWith(
+        "%"
+      )
+    ) {
+
+      console.log(
+        "[OCR] Ignoring percentage Equipment MDEF in absolute MDEF parser:",
+        rawValue
+      );
+
+
+      continue;
+
+    }
+
+
     const value =
       validateValue(
         "mdef",
         Number(
           repairNumericText(
-            match[1]
+            rawValue
           )
         )
       );
@@ -1792,40 +2529,25 @@ function parseText(
     }
 
 
-    equipmentMDEF =
-      value;
-
-
     result.mdefNotice.push({
 
       value,
 
       raw:
-        "Equipment MDEF:" +
-        value,
+        rawValue,
 
       screenshotIndex,
 
       mode,
 
-      confidence
+      confidence,
+
+      source:
+        "equipment-mdef-notice"
 
     });
 
   }
-
-
-  /*
-   * Deliberately DO NOT parse General Stats PDEF/MDEF.
-   *
-   * Example:
-   *
-   * PDEF 5619
-   * MDEF 1789
-   *
-   * Those are total values and must not override
-   * the Notice-derived Equipment values.
-   */
 
 
   return result;
@@ -1834,10 +2556,486 @@ function parseText(
 
 
 // ============================================================
+// DETECT QUASI-STATS SCREENSHOT
+// ============================================================
+//
+// We use BOTH:
+//
+// 1. Text markers
+// 2. Aspect ratio
+//
+// This prevents the bottom-row PvP ROI from being applied to
+// General Stats or Equipment screenshots.
+//
+// ============================================================
+
+function isQuasiStatsScreenshot(
+  text,
+  width,
+  height
+) {
+
+  const normalized =
+    compactLabel(
+      text
+    );
+
+
+  const textLooksQuasi =
+    (
+
+      normalized.includes(
+        "QUASISTATS"
+      )
+
+    ) ||
+
+    (
+
+      normalized.includes(
+        "PDMG"
+      ) &&
+
+      normalized.includes(
+        "MDMG"
+      ) &&
+
+      normalized.includes(
+        "IGNOREPDEF"
+      )
+
+    );
+
+
+  if (
+    textLooksQuasi
+  ) {
+
+    return true;
+
+  }
+
+
+  if (
+    width &&
+    height
+  ) {
+
+    const ratio =
+      width /
+      height;
+
+
+    /*
+     * The supplied Quasi-Stats screenshot is approximately
+     * square.
+     *
+     * General Stats is considerably wider.
+     *
+     * Equipment/Damage is also wider.
+     */
+
+    if (
+      ratio >=
+        0.85 &&
+      ratio <=
+        1.05
+    ) {
+
+      return true;
+
+    }
+
+  }
+
+
+  return false;
+
+}
+
+
+// ============================================================
+// EXTRACT NUMBER FROM NUMERIC OCR
+// ============================================================
+
+function extractNumericValue(
+  text,
+  key
+) {
+
+  if (
+    !text
+  ) {
+
+    return null;
+
+  }
+
+
+  const matches =
+    String(
+      text
+    ).match(
+      /\d[\d,]*/g
+    );
+
+
+  if (
+    !matches ||
+    matches.length ===
+      0
+  ) {
+
+    return null;
+
+  }
+
+
+  /*
+   * Numeric ROI should contain ONE number.
+   *
+   * If OCR somehow produces multiple pieces, combine
+   * the digit tokens where possible.
+   */
+
+  const repaired =
+    matches
+      .join(
+        ""
+      )
+      .replace(
+        /,/g,
+        ""
+      );
+
+
+  if (
+    !/^\d+$/.test(
+      repaired
+    )
+  ) {
+
+    return null;
+
+  }
+
+
+  const value =
+    validateValue(
+      key,
+      Number(
+        repaired
+      )
+    );
+
+
+  if (
+    value === null
+  ) {
+
+    return null;
+
+  }
+
+
+  return value;
+
+}
+
+
+// ============================================================
+// POSITIONAL PVP OCR
+// ============================================================
+//
+// This is the important new part.
+//
+// We DO NOT care what the labels say.
+//
+// We only read:
+//
+//     bottom-left number
+//
+// and:
+//
+//     bottom-right number
+//
+// ============================================================
+
+async function extractPositionalPvp(
+  imagePath,
+  screenshotIndex,
+  fullText,
+  confidence
+) {
+
+  const metadata =
+    await getImageMetadata(
+      imagePath
+    );
+
+
+  const width =
+    Number(
+      metadata.width
+    );
+
+
+  const height =
+    Number(
+      metadata.height
+    );
+
+
+  const isQuasi =
+    isQuasiStatsScreenshot(
+      fullText,
+      width,
+      height
+    );
+
+
+  if (
+    !isQuasi
+  ) {
+
+    console.log(
+      "[OCR PVP POSITION] Screenshot",
+      screenshotIndex + 1,
+      "does not appear to be Quasi-Stats. Skipping."
+    );
+
+
+    return {
+
+      pvpBonus:
+        [],
+
+      pvpReduction:
+        []
+
+    };
+
+  }
+
+
+  console.log(
+    "[OCR PVP POSITION] Quasi-Stats detected."
+  );
+
+
+  console.log(
+    "[OCR PVP POSITION] Image:",
+    width +
+      "x" +
+      height
+  );
+
+
+  const candidates = {
+
+    pvpBonus:
+      [],
+
+    pvpReduction:
+      []
+
+  };
+
+
+  const modes = [
+
+    "normal",
+
+    "contrast",
+
+    "highcontrast",
+
+    "threshold170",
+
+    "threshold200",
+
+    "threshold220"
+
+  ];
+
+
+  const fields = [
+
+    {
+
+      key:
+        "pvpReduction",
+
+      region:
+        PVP_POSITIONAL_ROIS
+          .pvpReduction
+
+    },
+
+    {
+
+      key:
+        "pvpBonus",
+
+      region:
+        PVP_POSITIONAL_ROIS
+          .pvpBonus
+
+    }
+
+  ];
+
+
+  for (
+    const mode of modes
+  ) {
+
+    for (
+      const field of fields
+    ) {
+
+      let cropPath =
+        null;
+
+
+      try {
+
+        cropPath =
+          await preprocessPvpNumber(
+            imagePath,
+            field.region,
+            mode
+          );
+
+
+        const ocr =
+          await runNumericOCR(
+            cropPath
+          );
+
+
+        const value =
+          extractNumericValue(
+            ocr.text,
+            field.key
+          );
+
+
+        console.log(
+          "[OCR PVP POSITION]",
+          field.key,
+          "| pass:",
+          mode,
+          "| raw:",
+          JSON.stringify(
+            ocr.text
+          ),
+          "| value:",
+          value
+        );
+
+
+        if (
+          value ===
+          null
+        ) {
+
+          continue;
+
+        }
+
+
+        candidates[
+          field.key
+        ].push({
+
+          value,
+
+          raw:
+            ocr.text
+              .trim(),
+
+          screenshotIndex,
+
+          mode,
+
+          confidence:
+            ocr.confidence,
+
+          source:
+            "position",
+
+          positionBased:
+            true,
+
+          score:
+            10000 +
+            Number(
+              ocr.confidence ||
+              0
+            )
+
+        });
+
+      } catch (
+        error
+      ) {
+
+        console.error(
+          "[OCR PVP POSITION] Failed:",
+          field.key,
+          "| pass:",
+          mode,
+          "|",
+          error.message
+        );
+
+      } finally {
+
+        if (
+          cropPath
+        ) {
+
+          try {
+
+            await fs.promises.unlink(
+              cropPath
+            );
+
+          } catch (
+            error
+          ) {
+
+            // Ignore cleanup errors.
+
+          }
+
+        }
+
+      }
+
+    }
+
+  }
+
+
+  return candidates;
+
+}
+
+
+// ============================================================
 // CHOOSE BEST CANDIDATE
 // ============================================================
 //
-// Repeated OCR agreement is heavily weighted.
+// Candidate priority:
+//
+// 1. Positional PvP OCR
+// 2. Repeated OCR agreement
+// 3. OCR confidence
+//
+// This means a label-based OCR mistake cannot override a
+// correctly positioned PvP number.
 //
 // ============================================================
 
@@ -1895,19 +3093,31 @@ function chooseBest(
           1;
 
 
+        const positionalBonus =
+          candidate.positionBased
+            ? 100000
+            : 0;
+
+
+        const confidence =
+          Number(
+            candidate.confidence ||
+            0
+          );
+
+
         return {
 
           candidate,
 
           score:
 
+            positionalBonus +
+
             count *
             1000 +
 
-            Number(
-              candidate.confidence ||
-              0
-            )
+            confidence
 
         };
 
@@ -1927,7 +3137,8 @@ function chooseBest(
   );
 
 
-  return scored[0].candidate;
+  return scored[0]
+    .candidate;
 
 }
 
@@ -2061,6 +3272,16 @@ const REQUIRED_FIELDS = [
   ],
 
   [
+    "PvP DMG Bonus",
+    "pvpBonus"
+  ],
+
+  [
+    "PvP DMG Reduction",
+    "pvpReduction"
+  ],
+
+  [
     "PDMG",
     "pdmg"
   ],
@@ -2136,6 +3357,22 @@ async function processScreenshot(
   imagePath,
   screenshotIndex
 ) {
+
+  console.log(
+    "========================================"
+  );
+
+
+  console.log(
+    "[OCR] Processing screenshot:",
+    screenshotIndex + 1
+  );
+
+
+  console.log(
+    "========================================"
+  );
+
 
   const candidates =
     {};
@@ -2314,6 +3551,49 @@ async function processScreenshot(
   }
 
 
+  // ==========================================================
+  // POSITIONAL PVP OCR
+  // ==========================================================
+  //
+  // Run ONCE against the original screenshot.
+  //
+  // Internally it performs its own six preprocessing passes.
+  //
+  // ==========================================================
+
+  try {
+
+    const pvpCandidates =
+      await extractPositionalPvp(
+        imagePath,
+        screenshotIndex,
+        "",
+        0
+      );
+
+
+    candidates.pvpBonus.push(
+      ...pvpCandidates.pvpBonus
+    );
+
+
+    candidates.pvpReduction.push(
+      ...pvpCandidates.pvpReduction
+    );
+
+
+  } catch (
+    error
+  ) {
+
+    console.error(
+      "[OCR PVP POSITION] Failed:",
+      error
+    );
+
+  }
+
+
   return candidates;
 
 }
@@ -2359,6 +3639,9 @@ function mergeResults(
           key,
           "=",
           best.value,
+          "| source:",
+          best.source ||
+            "label",
           "| raw:",
           best.raw
         );
@@ -2371,13 +3654,6 @@ function mergeResults(
 
   // ==========================================================
   // PDEF
-  // ==========================================================
-  //
-  // ONLY Equipment PDEF from Notice.
-  //
-  // Base PDEF is ignored.
-  // General Stats PDEF is ignored.
-  //
   // ==========================================================
 
   const bestPDEF =
@@ -2407,13 +3683,6 @@ function mergeResults(
   // ==========================================================
   // MDEF
   // ==========================================================
-  //
-  // ONLY Equipment MDEF from Notice.
-  //
-  // Base MDEF is ignored.
-  // General Stats MDEF is ignored.
-  //
-  // ==========================================================
 
   const bestMDEF =
     chooseBest(
@@ -2440,35 +3709,35 @@ function mergeResults(
 
 
   // ==========================================================
-  // WARNINGS
+  // REQUIRED FIELD WARNINGS
   // ==========================================================
 
-  REQUIRED_FIELDS.forEach(
-    function(field) {
+  for (
+    const field of REQUIRED_FIELDS
+  ) {
 
-      const label =
-        field[0];
+    const label =
+      field[0];
 
-      const key =
-        field[1];
+    const key =
+      field[1];
 
 
-      if (
-        stats[key] ===
-          null ||
-        stats[key] ===
-          undefined
-      ) {
+    if (
+      stats[key] ===
+        null ||
+      stats[key] ===
+        undefined
+    ) {
 
-        stats.warnings.push(
-          label +
-          " was not detected."
-        );
-
-      }
+      stats.warnings.push(
+        label +
+        " was not detected."
+      );
 
     }
-  );
+
+  }
 
 
   return stats;
@@ -2488,9 +3757,11 @@ function printCandidateSummary(
     "========================================"
   );
 
+
   console.log(
     "[OCR] CANDIDATE SUMMARY"
   );
+
 
   console.log(
     "========================================"
@@ -2509,7 +3780,7 @@ function printCandidateSummary(
 
       if (
         values.length ===
-          0
+        0
       ) {
 
         console.log(
@@ -2517,6 +3788,7 @@ function printCandidateSummary(
           key,
           ": NONE"
         );
+
 
         return;
 
@@ -2563,28 +3835,86 @@ function printCandidateSummary(
           )
           .slice(
             0,
-            3
+            5
           );
 
 
       console.log(
         "[OCR CANDIDATES]",
         key,
-        ordered.map(
-          function(value) {
+        ordered
+          .map(
+            function(value) {
+
+              return (
+
+                value +
+
+                " (" +
+
+                counts[value] +
+
+                "x)"
+
+              );
+
+            }
+          )
+          .join(
+            ", "
+          )
+      );
+
+
+      // ------------------------------------------------------
+      // Explicit positional candidates
+      // ------------------------------------------------------
+
+      const positional =
+        values.filter(
+          function(candidate) {
 
             return (
-              value +
-              " (" +
-              counts[value] +
-              "x)"
+              candidate.positionBased ===
+              true
             );
 
           }
-        ).join(
-          ", "
-        )
-      );
+        );
+
+
+      if (
+        positional.length >
+        0
+      ) {
+
+        console.log(
+          "[OCR POSITIONAL]",
+          key,
+          positional
+            .map(
+              function(candidate) {
+
+                return (
+
+                  candidate.value +
+
+                  " [" +
+
+                  candidate.mode +
+
+                  "]"
+
+                );
+
+              }
+            )
+            .join(
+              ", "
+            )
+        );
+
+      }
 
     }
   );
@@ -2595,21 +3925,28 @@ function printCandidateSummary(
     (
       candidates.pdefNotice ||
       []
-    ).map(
-      function(candidate) {
+    )
+      .map(
+        function(candidate) {
 
-        return (
-          candidate.value +
-          " (" +
-          candidate.raw +
-          ")"
-        );
+          return (
 
-      }
-    ).join(
-      ", "
-    ) ||
-    "NONE"
+            candidate.value +
+
+            " (" +
+
+            candidate.raw +
+
+            ")"
+
+          );
+
+        }
+      )
+      .join(
+        ", "
+      ) ||
+      "NONE"
   );
 
 
@@ -2618,21 +3955,33 @@ function printCandidateSummary(
     (
       candidates.mdefNotice ||
       []
-    ).map(
-      function(candidate) {
+    )
+      .map(
+        function(candidate) {
 
-        return (
-          candidate.value +
-          " (" +
-          candidate.raw +
-          ")"
-        );
+          return (
 
-      }
-    ).join(
-      ", "
-    ) ||
-    "NONE"
+            candidate.value +
+
+            " (" +
+
+            candidate.raw +
+
+            ")"
+
+          );
+
+        }
+      )
+      .join(
+        ", "
+      ) ||
+      "NONE"
+  );
+
+
+  console.log(
+    "========================================"
   );
 
 }
@@ -2665,14 +4014,17 @@ async function extractStats(
     "========================================"
   );
 
+
   console.log(
-    "[OCR] Starting local label-driven OCR"
+    "[OCR] Starting local OCR"
   );
+
 
   console.log(
     "[OCR] Images:",
     imageUrls.length
   );
+
 
   console.log(
     "========================================"
@@ -2709,7 +4061,7 @@ async function extractStats(
   try {
 
     // ========================================================
-    // DOWNLOAD ALL IMAGES FIRST
+    // DOWNLOAD
     // ========================================================
 
     for (
@@ -2745,7 +4097,7 @@ async function extractStats(
 
 
     // ========================================================
-    // PROCESS EVERY SCREENSHOT
+    // PROCESS
     // ========================================================
 
     for (
@@ -2754,7 +4106,7 @@ async function extractStats(
       i++
     ) {
 
-      const parsed =
+      const screenshotCandidates =
         await processScreenshot(
           downloaded[i],
           i
@@ -2762,7 +4114,7 @@ async function extractStats(
 
 
       Object.keys(
-        parsed
+        screenshotCandidates
       ).forEach(
         function(key) {
 
@@ -2777,7 +4129,7 @@ async function extractStats(
 
 
           allCandidates[key].push(
-            ...parsed[key]
+            ...screenshotCandidates[key]
           );
 
         }
@@ -2796,7 +4148,7 @@ async function extractStats(
 
 
     // ========================================================
-    // FINAL RESULT
+    // FINAL
     // ========================================================
 
     const stats =
@@ -2809,9 +4161,11 @@ async function extractStats(
       "========================================"
     );
 
+
     console.log(
       "[OCR] FINAL RESULT"
     );
+
 
     console.log(
       JSON.stringify(
@@ -2820,6 +4174,7 @@ async function extractStats(
         2
       )
     );
+
 
     console.log(
       "========================================"
@@ -2866,32 +4221,55 @@ async function extractStats(
 async function shutdownOCR() {
 
   if (
-    !worker
+    worker
   ) {
 
-    return;
+    try {
+
+      await worker.terminate();
+
+    } catch (
+      error
+    ) {
+
+      console.log(
+        "[OCR] Text worker shutdown error:",
+        error.message
+      );
+
+    }
+
+
+    worker =
+      null;
 
   }
 
 
-  try {
-
-    await worker.terminate();
-
-  } catch (
-    error
+  if (
+    numericWorker
   ) {
 
-    console.log(
-      "[OCR] Worker shutdown error:",
-      error.message
-    );
+    try {
+
+      await numericWorker.terminate();
+
+    } catch (
+      error
+    ) {
+
+      console.log(
+        "[OCR] Numeric worker shutdown error:",
+        error.message
+      );
+
+    }
+
+
+    numericWorker =
+      null;
 
   }
-
-
-  worker =
-    null;
 
 }
 
